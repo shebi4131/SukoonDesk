@@ -1,0 +1,20 @@
+@api = http://localhost:5281
+
+GET {{api}}/api/health
+Accept: application/json
+
+### Public configuration
+GET {{api}}/api/settings/public
+Accept: application/json
+
+### Create the first society administrator
+POST {{api}}/api/auth/sign-up
+Content-Type: application/json
+
+{
+  "fullName": "Society Administrator",
+  "email": "admin@example.com",
+  "password": "ChangeMe123",
+  "societyName": "Green View Society",
+  "societySlug": "green-view"
+}

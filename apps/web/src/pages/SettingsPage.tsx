@@ -1,0 +1,21 @@
+import { useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Globe2, Plus, Save, Settings2, Trash2 } from 'lucide-react'
+import { api } from '../lib/api'
+import type { Setting } from '../lib/types'
+import { useAuth } from '../auth/auth-context'
+
+export function SettingsPage() {
+  const queryClient = useQueryClient()
+  const { hasPermission } = useAuth()
+  const canManage = hasPermission('settings.manage')
+  const [editing, setEditing] = useState<Partial<Setting> | null>(null)
+  const settings = useQuery({ queryKey: ['settings'], queryFn: () => api<Setting[]>('/api/settings/') })
+  const save = useMutation({ mutationFn: (value: Partial<Setting>) => api<Setting>(`/api/settings/${encodeURIComponent(value.key!)}`, { method: 'PUT', body: JSON.stringify({ value: value.value ?? '', description: value.description ?? '', isPublic: value.isPublic ?? false }) }), onSuccess: async () => { setEditing(null); await queryClient.invalidateQueries({ queryKey: ['settings'] }) } })
+  const remove = useMutation({ mutationFn: (key: string) => api<void>(`/api/settings/${encodeURIComponent(key)}`, { method: 'DELETE' }), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['settings'] }) })
+  return <>
+    <div className="page-heading"><div><p className="breadcrumb">Administration / Configuration</p><h1>Society settings</h1><p>Database-backed configuration for branding, registration, workflows, and notifications.</p></div>{canManage && <button className="button button-primary" onClick={() => setEditing({ key: '', value: '', description: '', isPublic: false })}><Plus size={18} /> Add setting</button>}</div>
+    <div className="settings-layout"><nav className="settings-nav"><button className="active"><Settings2 size={18} /> General</button><button><Globe2 size={18} /> Public experience</button></nav><section className="panel settings-panel"><div className="panel-heading"><div><h2>Configuration registry</h2><p>Tenant values override application defaults without a deployment.</p></div></div><div className="settings-list">{settings.data?.map(setting => <div className="setting-row" key={setting.key}><div><strong>{setting.key}</strong><p>{setting.description || 'No description provided.'}</p><code>{setting.value}</code></div><div><span className={`visibility-pill ${setting.isPublic ? 'public' : ''}`}>{setting.isPublic ? 'Public' : 'Private'}</span>{canManage && <button className="text-button" onClick={() => setEditing(setting)}>Edit</button>}{canManage && <button className="danger-icon" onClick={() => remove.mutate(setting.key)}><Trash2 size={16} /></button>}</div></div>)}</div>{!settings.isLoading && !settings.data?.length && <div className="empty-state"><Settings2 /><h3>No settings yet</h3><p>Add a setting to override the application defaults for this society.</p></div>}</section></div>
+    {editing && <div className="modal-layer"><button className="drawer-scrim" onClick={() => setEditing(null)} aria-label="Close" /><div className="modal"><div className="modal-heading"><h2>{settings.data?.some(x => x.key === editing.key) ? 'Edit setting' : 'Add setting'}</h2><p>Changes are stored for the current tenant.</p></div><label>Key<input value={editing.key ?? ''} disabled={settings.data?.some(x => x.key === editing.key)} onChange={e => setEditing({ ...editing, key: e.target.value })} placeholder="category.settingName" /></label><label>Value<textarea rows={3} value={editing.value ?? ''} onChange={e => setEditing({ ...editing, value: e.target.value })} /></label><label>Description<input value={editing.description ?? ''} onChange={e => setEditing({ ...editing, description: e.target.value })} /></label><label className="check-label"><input type="checkbox" checked={editing.isPublic ?? false} onChange={e => setEditing({ ...editing, isPublic: e.target.checked })} /> Safe to expose in public application configuration</label><div className="modal-actions"><button className="button button-ghost" onClick={() => setEditing(null)}>Cancel</button><button className="button button-primary" onClick={() => save.mutate(editing)} disabled={!editing.key || save.isPending}><Save size={17} /> {save.isPending ? 'Saving…' : 'Save setting'}</button></div></div></div>}
+  </>
+}

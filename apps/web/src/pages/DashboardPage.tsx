@@ -1,0 +1,43 @@
+import { useMemo, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { Activity, AlertTriangle, BarChart3, CheckCircle2, Clock3, Filter, MessageSquarePlus, Star, UserRoundCheck, UsersRound } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { api } from '../lib/api'
+import type { Dashboard } from '../lib/types'
+import { humanize, relativeTime } from '../lib/format'
+
+const today = new Date().toISOString().slice(0, 10)
+const monthAgo = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)
+
+export function DashboardPage() {
+  const [filters, setFilters] = useState({ from: monthAgo, to: today, status: '', categoryId: '', priority: '', phase: '' })
+  const queryString = useMemo(() => { const query = new URLSearchParams(); Object.entries(filters).forEach(([key, value]) => value && query.set(key, value)); return query.toString() }, [filters])
+  const { data, isLoading } = useQuery({ queryKey: ['dashboard', filters], queryFn: () => api<Dashboard>(`/api/dashboard?${queryString}`) })
+  if (isLoading) return <div className="page-loading">Loading operational dashboard…</div>
+  if (!data) return <div className="page-loading">Dashboard is unavailable.</div>
+  const m = data.metrics
+  const maximum = (rows: Array<{ value: number }>) => Math.max(...rows.map(x => x.value), 1)
+  return <>
+    <div className="page-heading"><div><p className="breadcrumb">Workspace / Operations dashboard</p><h1>{data.greeting}</h1><p>Live complaint health, team workload, SLA risk, and resident experience across {data.society}.</p></div><Link to="/app/complaints" className="button button-primary"><MessageSquarePlus size={18} /> New complaint</Link></div>
+    <section className="dashboard-filter panel"><div><Filter size={17} /><strong>Dashboard filters</strong></div><label>From<input type="date" value={filters.from} onChange={e => setFilters(x => ({ ...x, from: e.target.value }))} /></label><label>To<input type="date" value={filters.to} onChange={e => setFilters(x => ({ ...x, to: e.target.value }))} /></label><label>Status<select value={filters.status} onChange={e => setFilters(x => ({ ...x, status: e.target.value }))}><option value="">All statuses</option>{data.filters.statuses.map(x => <option key={x}>{humanize(x)}</option>)}</select></label><label>Category<select value={filters.categoryId} onChange={e => setFilters(x => ({ ...x, categoryId: e.target.value }))}><option value="">All categories</option>{data.filters.categories.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label><label>Priority<select value={filters.priority} onChange={e => setFilters(x => ({ ...x, priority: e.target.value }))}><option value="">All priorities</option>{data.filters.priorities.map(x => <option key={x}>{x}</option>)}</select></label><label>Phase<select value={filters.phase} onChange={e => setFilters(x => ({ ...x, phase: e.target.value }))}><option value="">All phases</option>{data.filters.phases.map(x => <option key={x}>{humanize(x)}</option>)}</select></label></section>
+    <div className="dashboard-kpis">
+      <article><span className="metric-icon blue"><BarChart3 /></span><div><small>Total complaints</small><strong>{m.totalComplaints}</strong><em>Selected period</em></div></article>
+      <article><span className="metric-icon purple"><Activity /></span><div><small>Open workload</small><strong>{m.openComplaints}</strong><em>{m.unassigned} unassigned</em></div></article>
+      <article className={m.overdue ? 'risk' : ''}><span className="metric-icon amber"><AlertTriangle /></span><div><small>Overdue</small><strong>{m.overdue}</strong><em>{m.dueToday} due today</em></div></article>
+      <article><span className="metric-icon green"><CheckCircle2 /></span><div><small>SLA compliance</small><strong>{m.slaCompliance}%</strong><em>{m.resolvedThisMonth} resolved</em></div></article>
+      <article><span className="metric-icon blue"><Clock3 /></span><div><small>Avg. resolution</small><strong>{m.averageResolutionHours}h</strong><em>{m.closed} closed</em></div></article>
+      <article><span className="metric-icon amber"><Star /></span><div><small>Satisfaction</small><strong>{m.satisfaction}/5</strong><em>Resident feedback</em></div></article>
+      <article><span className="metric-icon purple"><UsersRound /></span><div><small>Public members</small><strong>{m.publicMembers}</strong><em>{m.activeMembers} total members</em></div></article>
+      <article><span className="metric-icon green"><UserRoundCheck /></span><div><small>Active staff</small><strong>{m.activeStaff}</strong><em>{m.roleCount} operational roles</em></div></article>
+    </div>
+    <div className="dashboard-chart-grid">
+      <section className="panel chart-panel dashboard-trend"><div className="panel-heading"><div><h2>12-week complaint trend</h2><p>New concerns versus completed resolutions.</p></div><div className="chart-legend"><span>Created</span><span className="resolved">Resolved</span></div></div><div className="trend-chart">{data.charts.trend.map(x => { const top = Math.max(...data.charts.trend.flatMap(y => [y.created, y.resolved]), 1); return <div className="trend-column" key={x.label}><div className="bar-pair"><i title={`${x.created} created`} style={{ height: `${x.created / top * 120}px` }} /><i className="resolved" title={`${x.resolved} resolved`} style={{ height: `${x.resolved / top * 120}px` }} /></div><span>{x.label}</span></div> })}</div></section>
+      <section className="panel chart-panel"><div className="panel-heading"><div><h2>Status portfolio</h2><p>Current distribution for the selected period.</p></div></div><div className="dashboard-bars">{data.charts.byStatus.map(x => <div key={x.name}><span><i className={`status-dot status-${x.name.toLowerCase()}`} />{humanize(x.name)}<strong>{x.value}</strong></span><b><i style={{ width: `${x.value / maximum(data.charts.byStatus) * 100}%` }} /></b></div>)}</div></section>
+      <section className="panel chart-panel"><div className="panel-heading"><div><h2>Top complaint categories</h2><p>Services receiving the most attention.</p></div></div><div className="dashboard-bars">{data.charts.byCategory.map(x => <div key={x.name}><span>{x.name}<strong>{x.value}</strong></span><b><i style={{ width: `${x.value / maximum(data.charts.byCategory) * 100}%` }} /></b></div>)}</div></section>
+      <section className="panel chart-panel"><div className="panel-heading"><div><h2>Backlog age</h2><p>How long open complaints have remained active.</p></div></div><div className="backlog-grid">{data.charts.backlog.map((x, index) => <article key={x.name} className={`age-${index}`}><strong>{x.value}</strong><span>{x.name}</span></article>)}</div></section>
+      <section className="panel chart-panel"><div className="panel-heading"><div><h2>Workload by assignee</h2><p>Ownership across supervisors and managers.</p></div></div><div className="dashboard-bars compact">{data.charts.byAssignee.slice(0, 7).map(x => <div key={x.name}><span>{x.name}<strong>{x.value}</strong></span><b><i style={{ width: `${x.value / maximum(data.charts.byAssignee) * 100}%` }} /></b></div>)}</div></section>
+      <section className="panel chart-panel"><div className="panel-heading"><div><h2>Complaints by phase</h2><p>Location hotspots from registered public members.</p></div></div>{data.charts.byPhase.length ? <div className="phase-donuts">{data.charts.byPhase.map(x => <article key={x.name}><span>{x.value}</span><strong>{humanize(x.name)}</strong></article>)}</div> : <p className="chart-empty">Phase data appears when public members register complaints.</p>}</section>
+    </div>
+    <section className="panel dashboard-recent"><div className="panel-heading"><div><h2>Recent complaints</h2><p>Latest records matching the dashboard filters.</p></div><Link className="text-button" to="/app/complaints">Open queue</Link></div><div>{data.recent.map(item => <Link to={`/app/complaints/${item.id}`} className="dashboard-complaint-row dashboard-complaint-rich" key={item.id}><span className={`status-dot status-${item.status.toLowerCase()}`} /><div><strong>{item.title}</strong><small>{item.number} · {item.category} · {item.source}</small></div><span>{item.resident}</span><span>{item.assignee ?? 'Unassigned'}</span><i className={`status-chip status-${item.status.toLowerCase()}`}>{humanize(item.status)}</i><time>{relativeTime(item.createdAt)}</time></Link>)}{!data.recent.length && <div className="empty-state compact"><MessageSquarePlus /><h3>No matching complaints</h3><p>Adjust the filters to broaden this dashboard view.</p></div>}</div></section>
+  </>
+}

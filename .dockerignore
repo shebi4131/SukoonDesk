@@ -1,0 +1,14 @@
+.git
+.github
+.vs
+**/bin
+**/obj
+**/node_modules
+**/dist
+**/App_Data
+*.db
+*.db-shm
+*.db-wal
+.env
+.env.*
+!.env.example

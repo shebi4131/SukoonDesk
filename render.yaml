@@ -1,0 +1,34 @@
+services:
+  - type: web
+    name: sukoondesk
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health/ready
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: Database__Provider
+        value: Postgres
+      - key: ConnectionStrings__Postgres
+        sync: false
+      - key: Email__Provider
+        value: Brevo
+      - key: Email__ApiKey
+        sync: false
+      - key: Email__FromEmail
+        sync: false
+      - key: Email__FromName
+        value: SukoonDesk Support
+      - key: Storage__Provider
+        value: S3
+      - key: Storage__ServiceUrl
+        sync: false
+      - key: Storage__AccessKey
+        sync: false
+      - key: Storage__SecretKey
+        sync: false
+      - key: Storage__Bucket
+        sync: false
+      - key: PlatformAdmin__Emails__0
+        sync: false
