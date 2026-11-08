@@ -44,6 +44,12 @@ public static class PlatformAdminEndpoints
         if (tenant is null) return Results.NotFound();
         tenant.IsActive = request.IsActive;
         var administrators = await db.MembershipRoles.Where(x => x.Membership.TenantId == id && x.Role.Name == "Society Administrator").Select(x => x.MembershipId).Distinct().ToListAsync();
+        if (request.IsActive)
+        {
+            await db.TenantMemberships
+                .Where(x => administrators.Contains(x.Id) && x.Status == Domain.MembershipStatus.Pending)
+                .ExecuteUpdateAsync(update => update.SetProperty(x => x.Status, Domain.MembershipStatus.Active));
+        }
         foreach (var membershipId in administrators)
             ComplaintEndpoints.AddNotification(db, id, membershipId, request.IsActive ? "Society activated" : "Society suspended", request.IsActive ? "Platform access has been restored." : "Platform access has been suspended by SukoonDesk administration.", request.IsActive ? "success" : "warning", "/app");
         await db.SaveChangesAsync();
