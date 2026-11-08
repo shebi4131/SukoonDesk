@@ -37,12 +37,35 @@ export function PublicComplaintPage() {
   if (!societySlug) return <div className="public-desk public-gate"><div className="public-gate-card"><Brand /><span className="public-icon"><MessageSquareText /></span><h1>Open your society complaint desk</h1><p>Enter the society URL provided by your management office.</p><label>Society URL<div className="input-prefix"><span>sukoondesk.app/public/</span><input value={slug} onChange={e => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))} placeholder="green-view" /></div></label><button className="button button-primary button-block" disabled={slug.length < 3} onClick={() => navigate(`/public/${slug}`)}>Continue <Search size={17} /></button><Link to="/" className="back-link"><ArrowLeft size={16} /> Back to SukoonDesk</Link></div></div>
 
   const register = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault(); setBusy(true); setMessage('')
-    const values = Object.fromEntries(new FormData(event.currentTarget))
+    event.preventDefault(); setMessage('')
+    const form = new FormData(event.currentTarget)
+    const values = {
+      fullName: String(form.get('fullName') ?? '').trim(),
+      cnic: String(form.get('cnic') ?? '').trim(),
+      phone: String(form.get('phone') ?? '').trim(),
+      email: String(form.get('email') ?? '').trim(),
+      password: String(form.get('password') ?? ''),
+      plotNo: String(form.get('plotNo') ?? '').trim(),
+      streetNo: String(form.get('streetNo') ?? '').trim(),
+      block: String(form.get('block') ?? '').trim(),
+      phase: String(form.get('phase') ?? ''),
+    }
+    const problems: string[] = []
+    if (values.fullName.length < 2) problems.push('Enter the member’s full name.')
+    if (values.cnic.replace(/\D/g, '').length !== 13) problems.push('CNIC must contain exactly 13 digits.')
+    if (values.phone.replace(/\D/g, '').length !== 11) problems.push('Mobile number must contain exactly 11 digits.')
+    if (values.password.length < 8 || !/[A-Z]/.test(values.password) || !/\d/.test(values.password)) problems.push('Password must contain at least 8 characters, one uppercase letter and one number.')
+    if (!values.plotNo || !values.streetNo) problems.push('Plot number and street number are required.')
+    if (!['JGI', 'JGII', 'KT', 'KTExt'].includes(values.phase)) problems.push('Select a phase.')
+    if (problems.length) { setMessage(problems.join(' ')); return }
+    setBusy(true)
     try {
       await api(`/api/public/societies/${societySlug}/register`, { method: 'POST', body: JSON.stringify(values) })
       await queryClient.invalidateQueries({ queryKey: ['public-member'] }); setTab('new'); setMessage('Your member account is ready. You can now register a complaint.')
-    } catch (error) { setMessage(error instanceof ApiError ? error.message : 'Registration could not be completed.') } finally { setBusy(false) }
+    } catch (error) {
+      const details = error instanceof ApiError ? Object.values(error.details ?? {}).flat() : []
+      setMessage(details.length ? details.join(' ') : error instanceof ApiError ? error.message : 'Registration could not be completed.')
+    } finally { setBusy(false) }
   }
   const signIn = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault(); setBusy(true); setMessage('')
@@ -87,7 +110,7 @@ export function PublicComplaintPage() {
       <nav className="public-tabs">{member ? <><button className={visibleTab === 'new' ? 'active' : ''} onClick={() => setTab('new')}><Send /> New complaint</button><button className={visibleTab === 'mine' ? 'active' : ''} onClick={() => setTab('mine')}><MessageSquareText /> My complaints</button><button className={visibleTab === 'track' ? 'active' : ''} onClick={() => setTab('track')}><Search /> Track complaint</button></> : <><button className={visibleTab === 'register' ? 'active' : ''} onClick={() => setTab('register')}><UserPlus /> Register</button><button className={visibleTab === 'sign-in' ? 'active' : ''} onClick={() => setTab('sign-in')}><LogIn /> Member sign in & track</button></>}</nav>
       {message && <div className={`public-message ${createdNumber ? 'success' : ''}`}>{message}</div>}
       {!member && tab === 'register' && <section className="public-card"><div className="public-card-heading"><span><UserPlus /></span><div><h2>Register as a society member</h2><p>Your information is saved securely so you can sign in and track future complaints.</p></div></div><form className="public-form" onSubmit={register}>
-        <label className="wide">Full name<input name="fullName" required placeholder="As shown on CNIC" /></label><label>CNIC<input name="cnic" required inputMode="numeric" maxLength={15} placeholder="35202-1234567-1" /></label><label>Mobile number<input name="phone" required placeholder="03xx xxxxxxx" /></label><label>Email address<input name="email" type="email" required placeholder="you@example.com" /></label><label>Password<div className="password-input"><input name="password" type={showPassword ? 'text' : 'password'} required minLength={8} placeholder="At least 8 characters" /><button type="button" onClick={() => setShowPassword(value => !value)} aria-label={showPassword ? 'Hide password' : 'Show password'} title={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button></div></label>
+        <label className="wide">Full name<input name="fullName" required minLength={2} autoComplete="name" placeholder="As shown on CNIC" /></label><label>CNIC<input name="cnic" required inputMode="numeric" maxLength={15} placeholder="35202-1234567-1" /></label><label>Mobile number<input name="phone" required inputMode="tel" autoComplete="tel" placeholder="03xx xxxxxxx" /></label><label>Email address<input name="email" type="email" required autoComplete="email" placeholder="you@example.com" /></label><label>Password<div className="password-input"><input name="password" type={showPassword ? 'text' : 'password'} required minLength={8} autoComplete="new-password" placeholder="8+ chars, uppercase & number" /><button type="button" onClick={() => setShowPassword(value => !value)} aria-label={showPassword ? 'Hide password' : 'Show password'} title={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button></div></label>
         <div className="form-divider wide"><span>Property address</span></div><label>Plot number<input name="plotNo" required placeholder="124" /></label><label>Street number<input name="streetNo" required placeholder="12" /></label><label>Block <small>Optional</small><input name="block" placeholder="A" /></label><label>Phase<select name="phase" required><option value="">Select phase</option><option value="JGI">JG-I</option><option value="JGII">JG-II</option><option value="KT">KT</option><option value="KTExt">KT Ext</option></select></label><button className="button button-primary wide" disabled={busy}>{busy ? 'Creating account…' : 'Register member account'}</button>
       </form></section>}
       {!member && tab === 'sign-in' && <section className="public-card public-auth-card"><div className="public-card-heading"><span><LogIn /></span><div><h2>{showRecovery ? 'Recover your password' : 'Welcome back'}</h2><p>{showRecovery ? 'Enter the email used during member registration.' : 'Sign in with the CNIC and password used during registration.'}</p></div></div>{showRecovery ? <form className="public-form" onSubmit={recoverPassword}><label className="wide">Email address<input name="email" type="email" required placeholder="you@example.com" /></label><button className="button button-primary wide" disabled={busy}>{busy ? 'Sending…' : 'Email new password'}</button><button type="button" className="text-button wide" onClick={() => setShowRecovery(false)}>Back to member sign in</button></form> : <form className="public-form" onSubmit={signIn}><label className="wide">CNIC<input name="cnic" required placeholder="35202-1234567-1" /></label><label className="wide">Password<div className="password-input"><input name="password" type={showPassword ? 'text' : 'password'} required /><button type="button" onClick={() => setShowPassword(value => !value)} aria-label={showPassword ? 'Hide password' : 'Show password'} title={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button></div></label><button className="button button-primary wide" disabled={busy}>Sign in to complaint desk</button><button type="button" className="text-button wide" onClick={() => setShowRecovery(true)}>Forgot password?</button></form>}</section>}

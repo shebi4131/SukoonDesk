@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.ComponentModel.DataAnnotations;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
@@ -45,28 +46,40 @@ public static class PublicEndpoints
     {
         var tenant = await db.Tenants.SingleOrDefaultAsync(x => x.Slug == slug.ToLower() && x.IsActive);
         if (tenant is null) return Results.NotFound(new { message = "Society not found." });
+        var fullName = request.FullName?.Trim() ?? string.Empty;
         var cnic = Digits(request.Cnic);
-        if (cnic.Length != 13) return Results.ValidationProblem(new Dictionary<string, string[]> { ["cnic"] = ["Enter a valid 13-digit CNIC."] });
-        if (string.IsNullOrWhiteSpace(request.PlotNo) || string.IsNullOrWhiteSpace(request.StreetNo) || string.IsNullOrWhiteSpace(request.Phone))
-            return Results.ValidationProblem(new Dictionary<string, string[]> { ["address"] = ["Phone, plot number, and street number are required."] });
+        var phone = request.Phone?.Trim() ?? string.Empty;
+        var email = request.Email?.Trim() ?? string.Empty;
+        var plotNo = request.PlotNo?.Trim() ?? string.Empty;
+        var streetNo = request.StreetNo?.Trim() ?? string.Empty;
+        var errors = new Dictionary<string, string[]>();
+        if (fullName.Length < 2) errors["fullName"] = ["Enter the member's full name."];
+        if (cnic.Length != 13) errors["cnic"] = ["CNIC must contain exactly 13 digits."];
+        if (Digits(phone).Length != 11) errors["phone"] = ["Mobile number must contain exactly 11 digits."];
+        if (!new EmailAddressAttribute().IsValid(email)) errors["email"] = ["Enter a valid email address."];
+        if (plotNo.Length == 0) errors["plotNo"] = ["Plot number is required."];
+        if (streetNo.Length == 0) errors["streetNo"] = ["Street number is required."];
+        if (request.Phase is null || !Enum.IsDefined(request.Phase.Value)) errors["phase"] = ["Select a valid phase."];
+        if (string.IsNullOrWhiteSpace(request.Password)) errors["password"] = ["Password is required."];
+        if (errors.Count > 0) return Results.ValidationProblem(errors);
         if (await db.PublicMembers.AnyAsync(x => x.TenantId == tenant.Id && x.Cnic == cnic))
             return Results.Conflict(new { message = "This CNIC is already registered. Sign in instead." });
 
         await using var transaction = await db.Database.BeginTransactionAsync();
         var syntheticEmail = $"{tenant.Slug}.{cnic}@members.sukoondesk.local";
-        var user = new ApplicationUser { UserName = syntheticEmail, Email = syntheticEmail, DisplayName = request.FullName.Trim(), EmailConfirmed = true };
-        var result = await userManager.CreateAsync(user, request.Password);
+        var user = new ApplicationUser { UserName = syntheticEmail, Email = syntheticEmail, DisplayName = fullName, EmailConfirmed = true };
+        var result = await userManager.CreateAsync(user, request.Password!);
         if (!result.Succeeded)
         {
             await transaction.RollbackAsync();
             return Results.ValidationProblem(result.Errors.GroupBy(x => x.Code).ToDictionary(x => x.Key, x => x.Select(e => e.Description).ToArray()));
         }
-        var membership = new TenantMembership { TenantId = tenant.Id, UserId = user.Id, Status = MembershipStatus.Active, UnitLabel = Address(request) };
+        var membership = new TenantMembership { TenantId = tenant.Id, UserId = user.Id, Status = MembershipStatus.Active, UnitLabel = Address(plotNo, streetNo, request.Block, request.Phase!.Value) };
         var member = new PublicMember
         {
-            TenantId = tenant.Id, Membership = membership, Cnic = cnic, FullName = request.FullName.Trim(),
-            Phone = request.Phone.Trim(), Email = request.Email.Trim(), PlotNo = request.PlotNo.Trim(), StreetNo = request.StreetNo.Trim(),
-            Block = request.Block?.Trim() ?? string.Empty, Phase = request.Phase
+            TenantId = tenant.Id, Membership = membership, Cnic = cnic, FullName = fullName,
+            Phone = phone, Email = email, PlotNo = plotNo, StreetNo = streetNo,
+            Block = request.Block?.Trim() ?? string.Empty, Phase = request.Phase.Value
         };
         db.PublicMembers.Add(member);
         await db.SaveChangesAsync();
@@ -276,13 +289,13 @@ public static class PublicEndpoints
         if (contentType.Equals("image/png", StringComparison.OrdinalIgnoreCase)) return read >= 8 && header.AsSpan(0, 8).SequenceEqual(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 });
         return read >= 12 && header.AsSpan(0, 4).SequenceEqual("RIFF"u8) && header.AsSpan(8, 4).SequenceEqual("WEBP"u8);
     }
-    private static string Digits(string value) => Regex.Replace(value ?? string.Empty, "[^0-9]", string.Empty);
-    private static string Address(PublicRegistrationRequest x) => $"Plot {x.PlotNo}, Street {x.StreetNo}{(string.IsNullOrWhiteSpace(x.Block) ? "" : $", Block {x.Block}")}, {Humanize(x.Phase)}";
+    private static string Digits(string? value) => Regex.Replace(value ?? string.Empty, "[^0-9]", string.Empty);
+    private static string Address(string plotNo, string streetNo, string? block, SocietyPhase phase) => $"Plot {plotNo}, Street {streetNo}{(string.IsNullOrWhiteSpace(block) ? "" : $", Block {block.Trim()}")}, {Humanize(phase)}";
     private static string Address(PublicMember x) => $"Plot {x.PlotNo}, Street {x.StreetNo}{(string.IsNullOrWhiteSpace(x.Block) ? "" : $", Block {x.Block}")}, {Humanize(x.Phase)}";
     private static string Humanize(SocietyPhase phase) => phase switch { SocietyPhase.JGI => "JG-I", SocietyPhase.JGII => "JG-II", SocietyPhase.KTExt => "KT Ext", _ => "KT" };
 }
 
-public sealed record PublicRegistrationRequest(string FullName, string Cnic, string Phone, string Email, string Password, string PlotNo, string StreetNo, string? Block, SocietyPhase Phase);
+public sealed record PublicRegistrationRequest(string? FullName, string? Cnic, string? Phone, string? Email, string? Password, string? PlotNo, string? StreetNo, string? Block, SocietyPhase? Phase);
 public sealed record PublicSignInRequest(string Cnic, string Password);
 public sealed record PublicComplaintRequest(string Title, string Description, string? Location, Guid CategoryId, ComplaintPriority? Priority);
 public sealed record PublicCommentRequest(string Body);
