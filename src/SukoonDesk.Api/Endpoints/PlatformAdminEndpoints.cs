@@ -17,7 +17,8 @@ public static class PlatformAdminEndpoints
     private static async Task<IResult> DashboardAsync(ClaimsPrincipal principal, AppDbContext db, IConfiguration configuration)
     {
         if (!await IsPlatformAdminAsync(principal, db, configuration)) return Results.Forbid();
-        var tenants = await db.Tenants.AsNoTracking().OrderByDescending(x => x.CreatedAt).Select(tenant => new
+        var platformTenantSlug = PlatformTenantSlug(configuration);
+        var tenants = await db.Tenants.AsNoTracking().Where(x => x.Slug != platformTenantSlug).OrderByDescending(x => x.CreatedAt).Select(tenant => new
         {
             tenant.Id, tenant.Name, tenant.Slug, tenant.IsActive, tenant.CreatedAt,
             memberCount = db.TenantMemberships.Count(x => x.TenantId == tenant.Id && x.Status != Domain.MembershipStatus.Deleted),
@@ -42,6 +43,8 @@ public static class PlatformAdminEndpoints
         if (!await IsPlatformAdminAsync(principal, db, configuration)) return Results.Forbid();
         var tenant = await db.Tenants.SingleOrDefaultAsync(x => x.Id == id);
         if (tenant is null) return Results.NotFound();
+        if (tenant.Slug == PlatformTenantSlug(configuration))
+            return Results.BadRequest(new { message = "The internal SukoonDesk administration workspace cannot be suspended." });
         tenant.IsActive = request.IsActive;
         var administrators = await db.MembershipRoles.Where(x => x.Membership.TenantId == id && x.Role.Name == "Society Administrator").Select(x => x.MembershipId).Distinct().ToListAsync();
         if (request.IsActive)
@@ -50,8 +53,6 @@ public static class PlatformAdminEndpoints
                 .Where(x => administrators.Contains(x.Id) && x.Status == Domain.MembershipStatus.Pending)
                 .ExecuteUpdateAsync(update => update.SetProperty(x => x.Status, Domain.MembershipStatus.Active));
         }
-        foreach (var membershipId in administrators)
-            ComplaintEndpoints.AddNotification(db, id, membershipId, request.IsActive ? "Society activated" : "Society suspended", request.IsActive ? "Platform access has been restored." : "Platform access has been suspended by SukoonDesk administration.", request.IsActive ? "success" : "warning", "/app");
         await db.SaveChangesAsync();
         return Results.Ok(new { tenant.Id, tenant.IsActive, message = request.IsActive ? "Society activated." : "Society suspended." });
     }
@@ -65,6 +66,9 @@ public static class PlatformAdminEndpoints
         var configured = configuration.GetSection("PlatformAdmin:Emails").Get<string[]>() ?? [];
         return configured.Any(x => string.Equals(x.Trim(), user.NormalizedEmail, StringComparison.OrdinalIgnoreCase) || string.Equals(x.Trim().ToUpperInvariant(), user.NormalizedEmail, StringComparison.Ordinal));
     }
+
+    private static string PlatformTenantSlug(IConfiguration configuration) =>
+        configuration["PlatformAdmin:Seed:SocietySlug"]?.Trim().ToLowerInvariant() ?? "sukoondesk-admin";
 }
 
 public sealed record TenantStatusRequest(bool IsActive);

@@ -24,7 +24,10 @@ public static class InsightEndpoints
     private static async Task<IResult> ListNotificationsAsync(ClaimsPrincipal principal, AppDbContext db, int limit = 20)
     {
         var (tenantId, membershipId) = ComplaintEndpoints.Context(principal);
-        var source = await db.Notifications.AsNoTracking().Where(x => x.TenantId == tenantId && x.MembershipId == membershipId).ToListAsync();
+        string[] hiddenTitles = ["Society activated", "Society suspended"];
+        var source = await db.Notifications.AsNoTracking()
+            .Where(x => x.TenantId == tenantId && x.MembershipId == membershipId && !hiddenTitles.Contains(x.Title))
+            .ToListAsync();
         var rows = source.OrderByDescending(x => x.CreatedAt).Take(Math.Clamp(limit, 1, 100))
             .Select(x => new { x.Id, x.Title, x.Message, x.Type, x.Link, x.IsRead, x.CreatedAt }).ToList();
         return Results.Ok(new { unreadCount = rows.Count(x => !x.IsRead), items = rows });
