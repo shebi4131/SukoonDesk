@@ -85,8 +85,14 @@ export function PublicComplaintPage() {
     const payload = { title: values.get('title'), description: values.get('description'), location: values.get('location'), categoryId: values.get('categoryId'), priority: values.get('priority') || null }
     try {
       const created = await api<{ number: string }>('/api/public/complaints', { method: 'POST', body: JSON.stringify(payload) })
-      for (const file of files) { const body = new FormData(); body.append('file', file); await api(`/api/public/complaints/${created.number}/attachments`, { method: 'POST', body }) }
       form.reset(); setCreatedNumber(created.number); setTrackingNumber(created.number); await queryClient.invalidateQueries({ queryKey: ['public-complaints'] })
+      let failedUploads = 0
+      for (const file of files) {
+        const body = new FormData(); body.append('file', file)
+        try { await api(`/api/public/complaints/${created.number}/attachments`, { method: 'POST', body }) }
+        catch { failedUploads += 1 }
+      }
+      if (failedUploads) setMessage(`Complaint ${created.number} was registered, but ${failedUploads} image${failedUploads === 1 ? '' : 's'} could not be uploaded. You can add evidence from the complaint page.`)
     } catch (error) { setMessage(error instanceof ApiError ? error.message : 'Complaint could not be registered.') } finally { setBusy(false) }
   }
   const loadComplaint = async (number = trackingNumber) => {
