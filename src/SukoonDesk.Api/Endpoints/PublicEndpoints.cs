@@ -17,6 +17,7 @@ public static class PublicEndpoints
     public static IEndpointRouteBuilder MapPublicEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/public").AllowAnonymous().WithTags("Public complaints").RequireRateLimiting("public");
+        group.MapGet("/societies", SearchSocietiesAsync);
         group.MapGet("/societies/{slug}", SocietyAsync);
         group.MapPost("/societies/{slug}/register", RegisterAsync);
         group.MapPost("/societies/{slug}/sign-in", SignInAsync);
@@ -30,6 +31,25 @@ public static class PublicEndpoints
         group.MapPost("/complaints/{number}/comments/{commentId:guid}/attachments", UploadCommentAttachmentAsync).DisableAntiforgery();
         app.MapGet("/api/files/{id:guid}", DownloadAttachmentAsync).AllowAnonymous();
         return app;
+    }
+
+    private static async Task<IResult> SearchSocietiesAsync(string? query, AppDbContext db, IConfiguration configuration)
+    {
+        var term = query?.Trim().ToLowerInvariant() ?? string.Empty;
+        if (term.Length < 2) return Results.Ok(Array.Empty<object>());
+
+        var platformSlug = configuration["PlatformAdmin:Seed:SocietySlug"]?.Trim().ToLowerInvariant() ?? "sukoondesk-admin";
+        var matches = await db.Tenants.AsNoTracking()
+            .Where(x => x.IsActive && x.Slug != platformSlug &&
+                (x.Name.ToLower().Contains(term) || x.Slug.ToLower().Contains(term)))
+            .OrderByDescending(x => x.Name.ToLower() == term || x.Slug == term)
+            .ThenByDescending(x => x.Name.ToLower().StartsWith(term) || x.Slug.StartsWith(term))
+            .ThenBy(x => x.Name)
+            .Take(10)
+            .Select(x => new { x.Name, x.Slug })
+            .ToListAsync();
+
+        return Results.Ok(matches);
     }
 
     private static async Task<IResult> SocietyAsync(string slug, AppDbContext db)

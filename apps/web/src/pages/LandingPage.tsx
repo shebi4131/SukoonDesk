@@ -54,7 +54,7 @@ export function LandingPage() {
 
         <section className="cta-section shell"><div><span><UsersRound /></span><h2>Bring more sukoon to your society.</h2><p>Start with the foundation today and grow into complete community operations.</p><Link to="/sign-up" className="button button-light button-large">Create your workspace <ArrowRight size={18} /></Link></div></section>
       </main>
-      <footer className="marketing-footer shell"><Brand /><p>© 2026 SukoonDesk. Every concern, resolved.</p><div><a href="#security">Privacy</a><a href="#security">Security</a></div></footer>
+      <footer className="marketing-footer shell"><Brand /><p>© 2026 SukoonDesk. Every concern, resolved. · Developed by Codeloom</p><div><Link to="/terms">Terms</Link><Link to="/privacy">Privacy</Link><a href="#security">Security</a></div></footer>
     </div>
   )
 }
