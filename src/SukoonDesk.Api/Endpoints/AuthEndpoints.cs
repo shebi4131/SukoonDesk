@@ -45,7 +45,12 @@ public static partial class AuthEndpoints
             return Results.Conflict(new { message = "An account with this email already exists." });
 
         await using var transaction = await db.Database.BeginTransactionAsync();
-        var tenant = new Tenant { Name = request.SocietyName.Trim(), Slug = slug, IsActive = false };
+        var tenant = new Tenant
+        {
+            Name = request.SocietyName.Trim(), Slug = slug, IsActive = false,
+            SubscriptionPlan = SubscriptionPlan.Trial, SubscriptionStatus = SubscriptionStatus.Trial,
+            TrialEndsAt = DateTimeOffset.UtcNow.AddDays(30), ResidentLimit = 250, StaffLimit = 10, MonthlyComplaintLimit = 500
+        };
         db.Tenants.Add(tenant);
         await db.SaveChangesAsync();
 
@@ -70,6 +75,8 @@ public static partial class AuthEndpoints
         var (adminRole, _) = await SeedData.CreateTenantRolesAsync(db, tenant.Id);
         db.MembershipRoles.Add(new MembershipRole { Membership = membership, Role = adminRole });
         db.ComplaintCategories.AddRange(SeedData.CreateDefaultCategories(tenant.Id));
+        db.TenantProjects.AddRange(
+            new TenantProject { TenantId = tenant.Id, Name = "Main Project", Code = "MAIN", Description = "Default project. Rename or add more projects from the portal.", SortOrder = 1 });
         db.AppSettings.AddRange(
             new AppSetting { TenantId = tenant.Id, Key = "society.name", Value = tenant.Name, IsPublic = true, Description = "Public society name" },
             new AppSetting { TenantId = tenant.Id, Key = "complaints.defaultSlaHours", Value = "48", Description = "Default complaint resolution SLA" },
@@ -149,6 +156,8 @@ public static partial class AuthEndpoints
         if (tenant is null || user is null || !user.IsActive || !await userManager.CheckPasswordAsync(user, request.Password))
             return Results.Unauthorized();
         if (!tenant.IsActive) return Results.Json(new { message = "This society request is awaiting approval. We will email the administrator when it is approved." }, statusCode: StatusCodes.Status403Forbidden);
+        if (!TenantAccess.IsAvailable(tenant))
+            return Results.Json(new { message = "This society subscription is currently unavailable. Contact your society or SukoonDesk administrator." }, statusCode: StatusCodes.Status403Forbidden);
 
         var membership = await db.TenantMemberships.SingleOrDefaultAsync(x =>
             x.TenantId == tenant.Id && x.UserId == user.Id && x.Status == MembershipStatus.Active);

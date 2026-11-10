@@ -13,6 +13,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Tenant> Tenants => Set<Tenant>();
     public DbSet<TenantMembership> TenantMemberships => Set<TenantMembership>();
     public DbSet<PublicMember> PublicMembers => Set<PublicMember>();
+    public DbSet<TenantProject> TenantProjects => Set<TenantProject>();
     public DbSet<TenantRole> TenantRoles => Set<TenantRole>();
     public DbSet<Permission> Permissions => Set<Permission>();
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
@@ -36,7 +37,12 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
         builder.Entity<TenantMembership>().HasIndex(x => new { x.TenantId, x.UserId }).IsUnique();
         builder.Entity<PublicMember>().HasIndex(x => new { x.TenantId, x.Cnic }).IsUnique();
         builder.Entity<PublicMember>().HasIndex(x => x.MembershipId).IsUnique();
+        builder.Entity<TenantProject>().HasIndex(x => new { x.TenantId, x.Name }).IsUnique();
+        builder.Entity<TenantProject>().HasIndex(x => new { x.TenantId, x.Code }).IsUnique();
+        builder.Entity<TenantProject>().Property(x => x.Name).HasMaxLength(120);
+        builder.Entity<TenantProject>().Property(x => x.Code).HasMaxLength(30);
         builder.Entity<PublicMember>().HasOne(x => x.Membership).WithOne().HasForeignKey<PublicMember>(x => x.MembershipId).OnDelete(DeleteBehavior.Cascade);
+        builder.Entity<PublicMember>().HasOne(x => x.Project).WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.SetNull);
         builder.Entity<TenantRole>().HasIndex(x => new { x.TenantId, x.Name }).IsUnique();
         builder.Entity<TenantRole>().Property(x => x.Name).HasMaxLength(100);
         builder.Entity<Permission>().HasIndex(x => x.Key).IsUnique();

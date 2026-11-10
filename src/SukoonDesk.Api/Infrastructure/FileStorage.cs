@@ -81,12 +81,22 @@ public sealed class S3FileStorage : IFileStorage, IDisposable
         _client = new AmazonS3Client(_options.AccessKey, _options.SecretKey, new AmazonS3Config
         {
             ServiceURL = _options.ServiceUrl,
+            AuthenticationRegion = "auto",
             ForcePathStyle = true
         });
     }
 
     public async Task SaveAsync(string key, Stream content, string contentType, CancellationToken cancellationToken = default) =>
-        await _client.PutObjectAsync(new PutObjectRequest { BucketName = _options.Bucket, Key = key, InputStream = content, ContentType = contentType, AutoCloseStream = false }, cancellationToken);
+        await _client.PutObjectAsync(new PutObjectRequest
+        {
+            BucketName = _options.Bucket,
+            Key = key,
+            InputStream = content,
+            ContentType = contentType,
+            AutoCloseStream = false,
+            DisablePayloadSigning = true,
+            DisableDefaultChecksumValidation = true
+        }, cancellationToken);
 
     public async Task<StoredObject?> ReadAsync(string key, CancellationToken cancellationToken = default)
     {

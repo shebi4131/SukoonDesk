@@ -719,6 +719,12 @@ namespace SukoonDesk.Api.Infrastructure.Migrations
                     b.Property<Guid>("MembershipId")
                         .HasColumnType("uuid");
 
+                    b.Property<bool>("NotifyByEmail")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("NotifyByWhatsApp")
+                        .HasColumnType("boolean");
+
                     b.Property<int>("Phase")
                         .HasColumnType("integer");
 
@@ -730,6 +736,9 @@ namespace SukoonDesk.Api.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<Guid?>("ProjectId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("StreetNo")
                         .IsRequired()
                         .HasColumnType("text");
@@ -737,10 +746,16 @@ namespace SukoonDesk.Api.Infrastructure.Migrations
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("WhatsAppNumber")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.HasKey("Id");
 
                     b.HasIndex("MembershipId")
                         .IsUnique();
+
+                    b.HasIndex("ProjectId");
 
                     b.HasIndex("TenantId", "Cnic")
                         .IsUnique();
@@ -769,21 +784,46 @@ namespace SukoonDesk.Api.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("BillingNotes")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
 
+                    b.Property<int>("MonthlyComplaintLimit")
+                        .HasColumnType("integer");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(160)
                         .HasColumnType("character varying(160)");
 
+                    b.Property<int>("ResidentLimit")
+                        .HasColumnType("integer");
+
                     b.Property<string>("Slug")
                         .IsRequired()
                         .HasMaxLength(80)
                         .HasColumnType("character varying(80)");
+
+                    b.Property<int>("StaffLimit")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("SubscriptionEndsAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("SubscriptionPlan")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("SubscriptionStatus")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("TrialEndsAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
 
@@ -825,11 +865,57 @@ namespace SukoonDesk.Api.Infrastructure.Migrations
                     b.ToTable("TenantMemberships");
                 });
 
+            modelBuilder.Entity("SukoonDesk.Api.Domain.TenantProject", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "Code")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "Name")
+                        .IsUnique();
+
+                    b.ToTable("TenantProjects");
+                });
+
             modelBuilder.Entity("SukoonDesk.Api.Domain.TenantRole", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
+
+                    b.Property<bool>("CanReceiveAssignments")
+                        .HasColumnType("boolean");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -1111,6 +1197,11 @@ namespace SukoonDesk.Api.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("SukoonDesk.Api.Domain.TenantProject", "Project")
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("SukoonDesk.Api.Domain.Tenant", "Tenant")
                         .WithMany()
                         .HasForeignKey("TenantId")
@@ -1118,6 +1209,8 @@ namespace SukoonDesk.Api.Infrastructure.Migrations
                         .IsRequired();
 
                     b.Navigation("Membership");
+
+                    b.Navigation("Project");
 
                     b.Navigation("Tenant");
                 });
@@ -1158,6 +1251,17 @@ namespace SukoonDesk.Api.Infrastructure.Migrations
                     b.Navigation("Tenant");
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("SukoonDesk.Api.Domain.TenantProject", b =>
+                {
+                    b.HasOne("SukoonDesk.Api.Domain.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Tenant");
                 });
 
             modelBuilder.Entity("SukoonDesk.Api.Domain.TenantRole", b =>

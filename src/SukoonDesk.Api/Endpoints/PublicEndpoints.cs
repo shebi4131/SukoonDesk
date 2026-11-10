@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.ComponentModel.DataAnnotations;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
@@ -16,6 +17,7 @@ public static class PublicEndpoints
     public static IEndpointRouteBuilder MapPublicEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/public").AllowAnonymous().WithTags("Public complaints").RequireRateLimiting("public");
+        group.MapGet("/societies", SearchSocietiesAsync);
         group.MapGet("/societies/{slug}", SocietyAsync);
         group.MapPost("/societies/{slug}/register", RegisterAsync);
         group.MapPost("/societies/{slug}/sign-in", SignInAsync);
@@ -31,13 +33,36 @@ public static class PublicEndpoints
         return app;
     }
 
-    private static async Task<IResult> SocietyAsync(string slug, AppDbContext db)
+    private static async Task<IResult> SearchSocietiesAsync(string? query, AppDbContext db, IConfiguration configuration)
+    {
+        var term = query?.Trim().ToLowerInvariant() ?? string.Empty;
+        if (term.Length < 2) return Results.Ok(Array.Empty<object>());
+
+        var platformSlug = configuration["PlatformAdmin:Seed:SocietySlug"]?.Trim().ToLowerInvariant() ?? "sukoondesk-admin";
+        var matches = await db.Tenants.AsNoTracking()
+            .Where(x => x.IsActive && x.SubscriptionStatus != SubscriptionStatus.Suspended && x.SubscriptionStatus != SubscriptionStatus.Expired && x.Slug != platformSlug &&
+                (x.Name.ToLower().Contains(term) || x.Slug.ToLower().Contains(term)))
+            .OrderByDescending(x => x.Name.ToLower() == term || x.Slug == term)
+            .ThenByDescending(x => x.Name.ToLower().StartsWith(term) || x.Slug.StartsWith(term))
+            .ThenBy(x => x.Name)
+            .Take(10)
+            .Select(x => new { x.Name, x.Slug })
+            .ToListAsync();
+
+        return Results.Ok(matches);
+    }
+
+    private static async Task<IResult> SocietyAsync(string slug, AppDbContext db, IConfiguration configuration)
     {
         var tenant = await db.Tenants.AsNoTracking().SingleOrDefaultAsync(x => x.Slug == slug.ToLower() && x.IsActive);
-        if (tenant is null) return Results.NotFound(new { message = "Society not found." });
+        var platformSlug = configuration["PlatformAdmin:Seed:SocietySlug"]?.Trim().ToLowerInvariant() ?? "sukoondesk-admin";
+        if (tenant is null || tenant.Slug == platformSlug || !TenantAccess.IsAvailable(tenant))
+            return Results.NotFound(new { message = "Society not found." });
         var categories = await db.ComplaintCategories.AsNoTracking().Where(x => x.TenantId == tenant.Id && x.IsActive)
             .OrderBy(x => x.Name).Select(x => new { x.Id, x.Name, x.Description, x.Color, x.DefaultSlaHours }).ToListAsync();
-        return Results.Ok(new { tenant.Id, tenant.Name, tenant.Slug, categories, phases = Enum.GetNames<SocietyPhase>() });
+        var projects = await db.TenantProjects.AsNoTracking().Where(x => x.TenantId == tenant.Id && x.IsActive)
+            .OrderBy(x => x.SortOrder).ThenBy(x => x.Name).Select(x => new { x.Id, x.Name, x.Code, x.Description }).ToListAsync();
+        return Results.Ok(new { tenant.Id, tenant.Name, tenant.Slug, categories, projects });
     }
 
     private static async Task<IResult> RegisterAsync(string slug, PublicRegistrationRequest request, HttpContext http,
@@ -45,28 +70,48 @@ public static class PublicEndpoints
     {
         var tenant = await db.Tenants.SingleOrDefaultAsync(x => x.Slug == slug.ToLower() && x.IsActive);
         if (tenant is null) return Results.NotFound(new { message = "Society not found." });
+        if (!TenantAccess.IsAvailable(tenant)) return Results.StatusCode(StatusCodes.Status402PaymentRequired);
+        if (await db.PublicMembers.CountAsync(x => x.TenantId == tenant.Id && x.IsActive) >= tenant.ResidentLimit)
+            return Results.Problem("This society has reached its resident allowance. Contact the society administrator.", statusCode: StatusCodes.Status403Forbidden);
+        var fullName = request.FullName?.Trim() ?? string.Empty;
         var cnic = Digits(request.Cnic);
-        if (cnic.Length != 13) return Results.ValidationProblem(new Dictionary<string, string[]> { ["cnic"] = ["Enter a valid 13-digit CNIC."] });
-        if (string.IsNullOrWhiteSpace(request.PlotNo) || string.IsNullOrWhiteSpace(request.StreetNo) || string.IsNullOrWhiteSpace(request.Phone))
-            return Results.ValidationProblem(new Dictionary<string, string[]> { ["address"] = ["Phone, plot number, and street number are required."] });
+        var whatsappNumber = request.WhatsAppNumber?.Trim() ?? string.Empty;
+        var email = request.Email?.Trim() ?? string.Empty;
+        var plotNo = request.PlotNo?.Trim() ?? string.Empty;
+        var streetNo = request.StreetNo?.Trim() ?? string.Empty;
+        var errors = new Dictionary<string, string[]>();
+        if (fullName.Length < 2) errors["fullName"] = ["Enter the member's full name."];
+        if (cnic.Length != 13) errors["cnic"] = ["CNIC must contain exactly 13 digits."];
+        if (Digits(whatsappNumber).Length is < 10 or > 13) errors["whatsAppNumber"] = ["Enter a valid WhatsApp number including its country or local prefix."];
+        if (!new EmailAddressAttribute().IsValid(email)) errors["email"] = ["Enter a valid email address."];
+        if (plotNo.Length == 0) errors["plotNo"] = ["Plot number is required."];
+        if (streetNo.Length == 0) errors["streetNo"] = ["Street number is required."];
+        var project = request.ProjectId.HasValue
+            ? await db.TenantProjects.SingleOrDefaultAsync(x => x.Id == request.ProjectId && x.TenantId == tenant.Id && x.IsActive)
+            : null;
+        if (project is null) errors["projectId"] = ["Select a valid project or phase."];
+        if (!request.NotifyByEmail && !request.NotifyByWhatsApp) errors["notifications"] = ["Select at least one update channel."];
+        if (string.IsNullOrWhiteSpace(request.Password)) errors["password"] = ["Password is required."];
+        if (errors.Count > 0) return Results.ValidationProblem(errors);
         if (await db.PublicMembers.AnyAsync(x => x.TenantId == tenant.Id && x.Cnic == cnic))
             return Results.Conflict(new { message = "This CNIC is already registered. Sign in instead." });
 
         await using var transaction = await db.Database.BeginTransactionAsync();
         var syntheticEmail = $"{tenant.Slug}.{cnic}@members.sukoondesk.local";
-        var user = new ApplicationUser { UserName = syntheticEmail, Email = syntheticEmail, DisplayName = request.FullName.Trim(), EmailConfirmed = true };
-        var result = await userManager.CreateAsync(user, request.Password);
+        var user = new ApplicationUser { UserName = syntheticEmail, Email = syntheticEmail, DisplayName = fullName, EmailConfirmed = true };
+        var result = await userManager.CreateAsync(user, request.Password!);
         if (!result.Succeeded)
         {
             await transaction.RollbackAsync();
             return Results.ValidationProblem(result.Errors.GroupBy(x => x.Code).ToDictionary(x => x.Key, x => x.Select(e => e.Description).ToArray()));
         }
-        var membership = new TenantMembership { TenantId = tenant.Id, UserId = user.Id, Status = MembershipStatus.Active, UnitLabel = Address(request) };
+        var membership = new TenantMembership { TenantId = tenant.Id, UserId = user.Id, Status = MembershipStatus.Active, UnitLabel = Address(plotNo, streetNo, request.Block, project!.Name) };
         var member = new PublicMember
         {
-            TenantId = tenant.Id, Membership = membership, Cnic = cnic, FullName = request.FullName.Trim(),
-            Phone = request.Phone.Trim(), Email = request.Email.Trim(), PlotNo = request.PlotNo.Trim(), StreetNo = request.StreetNo.Trim(),
-            Block = request.Block?.Trim() ?? string.Empty, Phase = request.Phase
+            TenantId = tenant.Id, Membership = membership, Cnic = cnic, FullName = fullName,
+            Phone = whatsappNumber, WhatsAppNumber = whatsappNumber, Email = email, PlotNo = plotNo, StreetNo = streetNo,
+            Block = request.Block?.Trim() ?? string.Empty, ProjectId = project.Id,
+            NotifyByEmail = request.NotifyByEmail, NotifyByWhatsApp = request.NotifyByWhatsApp
         };
         db.PublicMembers.Add(member);
         await db.SaveChangesAsync();
@@ -81,7 +126,8 @@ public static class PublicEndpoints
         var cnic = Digits(request.Cnic);
         var member = await db.PublicMembers.Include(x => x.Tenant).Include(x => x.Membership).ThenInclude(x => x.User)
             .SingleOrDefaultAsync(x => x.Tenant.Slug == slug.ToLower() && x.Cnic == cnic && x.IsActive);
-        if (member is null || !await userManager.CheckPasswordAsync(member.Membership.User, request.Password)) return Results.Unauthorized();
+        if (member is null || !TenantAccess.IsAvailable(member.Tenant) ||
+            !await userManager.CheckPasswordAsync(member.Membership.User, request.Password)) return Results.Unauthorized();
         SetCookie(http, protection, member);
         return Results.Ok(MemberPayload(member, member.Tenant));
     }
@@ -112,17 +158,19 @@ public static class PublicEndpoints
         return Results.Ok(items);
     }
 
-    private static async Task<IResult> CreateComplaintAsync(PublicComplaintRequest request, HttpContext http, AppDbContext db, IDataProtectionProvider protection)
+    private static async Task<IResult> CreateComplaintAsync(PublicComplaintRequest request, HttpContext http, AppDbContext db, IDataProtectionProvider protection, NotificationDispatcher notifications, CancellationToken cancellationToken)
     {
         var member = await CurrentMemberAsync(http, db, protection);
         if (member is null) return Results.Unauthorized();
+        var now = DateTimeOffset.UtcNow;
+        if (await TenantAccess.MonthlyComplaintCountAsync(db, member.TenantId, now, cancellationToken) >= member.Tenant.MonthlyComplaintLimit)
+            return Results.Problem("This society has reached its monthly complaint allowance.", statusCode: StatusCodes.Status403Forbidden);
         var category = await db.ComplaintCategories.SingleOrDefaultAsync(x => x.Id == request.CategoryId && x.TenantId == member.TenantId && x.IsActive);
         if (category is null) return Results.ValidationProblem(new Dictionary<string, string[]> { ["categoryId"] = ["Select a valid category."] });
         if (string.IsNullOrWhiteSpace(request.Title) || string.IsNullOrWhiteSpace(request.Description))
             return Results.ValidationProblem(new Dictionary<string, string[]> { ["complaint"] = ["Title and description are required."] });
 
         var number = await UniqueNumberAsync(db, member.TenantId);
-        var now = DateTimeOffset.UtcNow;
         var location = string.IsNullOrWhiteSpace(request.Location) ? Address(member) : request.Location.Trim();
         var rule = await db.AssignmentRules.Where(x => x.TenantId == member.TenantId && x.IsActive &&
                 (x.CategoryId == null || x.CategoryId == category.Id) && (x.LocationContains == "" || location.Contains(x.LocationContains)))
@@ -140,7 +188,8 @@ public static class PublicEndpoints
             TenantId = member.TenantId, Complaint = complaint, ToStatus = complaint.Status,
             ChangedByMembershipId = member.MembershipId, Note = rule is null ? "Complaint submitted through the public desk" : $"Automatically assigned by rule: {rule.Name}"
         });
-        if (rule is not null) ComplaintEndpoints.AddNotification(db, member.TenantId, rule.SupervisorMembershipId, "New public complaint", $"{number}: {complaint.Title}", "assignment", $"/app/complaints/{complaint.Id}");
+        if (rule is not null)
+            await notifications.NotifyAsync(member.TenantId, rule.SupervisorMembershipId, "New public complaint assigned", $"{number}: {complaint.Title}", "assignment", $"/app/complaints/{complaint.Id}", true, true, cancellationToken);
         await db.SaveChangesAsync();
         return Results.Created($"/api/public/complaints/{number}", new { complaint.Number, complaint.Id, message = "Complaint registered successfully. Save this number to track progress." });
     }
@@ -242,8 +291,9 @@ public static class PublicEndpoints
         {
             var raw = protection.CreateProtector("SukoonDesk.PublicMember.v1").Unprotect(value);
             if (!Guid.TryParse(raw, out var id)) return null;
-            return await db.PublicMembers.Include(x => x.Tenant).Include(x => x.Membership).ThenInclude(x => x.User)
+            var member = await db.PublicMembers.Include(x => x.Project).Include(x => x.Tenant).Include(x => x.Membership).ThenInclude(x => x.User)
                 .SingleOrDefaultAsync(x => x.Id == id && x.IsActive && x.Membership.Status == MembershipStatus.Active);
+            return member is not null && TenantAccess.IsAvailable(member.Tenant) ? member : null;
         }
         catch { return null; }
     }
@@ -264,7 +314,9 @@ public static class PublicEndpoints
 
     private static object MemberPayload(PublicMember member, Tenant tenant) => new
     {
-        member.Id, member.FullName, member.Phone, member.Email, member.PlotNo, member.StreetNo, member.Block, member.Phase,
+        member.Id, member.FullName, member.WhatsAppNumber, member.Email, member.PlotNo, member.StreetNo, member.Block,
+        member.ProjectId, project = member.Project == null ? null : new { member.Project.Id, member.Project.Name, member.Project.Code },
+        member.NotifyByEmail, member.NotifyByWhatsApp,
         tenant = new { tenant.Id, tenant.Name, tenant.Slug }
     };
     private static object AttachmentPayload(ComplaintAttachment x) => new { x.Id, x.FileName, x.ContentType, x.Size, url = $"/api/files/{x.Id}" };
@@ -276,13 +328,12 @@ public static class PublicEndpoints
         if (contentType.Equals("image/png", StringComparison.OrdinalIgnoreCase)) return read >= 8 && header.AsSpan(0, 8).SequenceEqual(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 });
         return read >= 12 && header.AsSpan(0, 4).SequenceEqual("RIFF"u8) && header.AsSpan(8, 4).SequenceEqual("WEBP"u8);
     }
-    private static string Digits(string value) => Regex.Replace(value ?? string.Empty, "[^0-9]", string.Empty);
-    private static string Address(PublicRegistrationRequest x) => $"Plot {x.PlotNo}, Street {x.StreetNo}{(string.IsNullOrWhiteSpace(x.Block) ? "" : $", Block {x.Block}")}, {Humanize(x.Phase)}";
-    private static string Address(PublicMember x) => $"Plot {x.PlotNo}, Street {x.StreetNo}{(string.IsNullOrWhiteSpace(x.Block) ? "" : $", Block {x.Block}")}, {Humanize(x.Phase)}";
-    private static string Humanize(SocietyPhase phase) => phase switch { SocietyPhase.JGI => "JG-I", SocietyPhase.JGII => "JG-II", SocietyPhase.KTExt => "KT Ext", _ => "KT" };
+    private static string Digits(string? value) => Regex.Replace(value ?? string.Empty, "[^0-9]", string.Empty);
+    private static string Address(string plotNo, string streetNo, string? block, string project) => $"Plot {plotNo}, Street {streetNo}{(string.IsNullOrWhiteSpace(block) ? "" : $", Block {block.Trim()}")}, {project}";
+    private static string Address(PublicMember x) => $"Plot {x.PlotNo}, Street {x.StreetNo}{(string.IsNullOrWhiteSpace(x.Block) ? "" : $", Block {x.Block}")}{(x.Project is null ? "" : $", {x.Project.Name}")}";
 }
 
-public sealed record PublicRegistrationRequest(string FullName, string Cnic, string Phone, string Email, string Password, string PlotNo, string StreetNo, string? Block, SocietyPhase Phase);
+public sealed record PublicRegistrationRequest(string? FullName, string? Cnic, string? WhatsAppNumber, string? Email, string? Password, string? PlotNo, string? StreetNo, string? Block, Guid? ProjectId, bool NotifyByEmail = true, bool NotifyByWhatsApp = false);
 public sealed record PublicSignInRequest(string Cnic, string Password);
 public sealed record PublicComplaintRequest(string Title, string Description, string? Location, Guid CategoryId, ComplaintPriority? Priority);
 public sealed record PublicCommentRequest(string Body);

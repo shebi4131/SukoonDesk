@@ -11,6 +11,15 @@ public static class SchemaUpgrade
 
         var connection = db.Database.GetDbConnection();
         await connection.OpenAsync();
+        await EnsureColumnAsync(db, connection, "Tenants", "SubscriptionPlan", "INTEGER NOT NULL DEFAULT 2");
+        await EnsureColumnAsync(db, connection, "Tenants", "SubscriptionStatus", "INTEGER NOT NULL DEFAULT 1");
+        await EnsureColumnAsync(db, connection, "Tenants", "TrialEndsAt", "TEXT NULL");
+        await EnsureColumnAsync(db, connection, "Tenants", "SubscriptionEndsAt", "TEXT NULL");
+        await EnsureColumnAsync(db, connection, "Tenants", "ResidentLimit", "INTEGER NOT NULL DEFAULT 2000");
+        await EnsureColumnAsync(db, connection, "Tenants", "StaffLimit", "INTEGER NOT NULL DEFAULT 50");
+        await EnsureColumnAsync(db, connection, "Tenants", "MonthlyComplaintLimit", "INTEGER NOT NULL DEFAULT 5000");
+        await EnsureColumnAsync(db, connection, "Tenants", "BillingNotes", "TEXT NOT NULL DEFAULT ''");
+        await EnsureColumnAsync(db, connection, "TenantRoles", "CanReceiveAssignments", "INTEGER NOT NULL DEFAULT 0");
         await using (var command = connection.CreateCommand())
         {
             command.CommandText = "PRAGMA table_info('TenantMemberships');";
@@ -124,6 +133,14 @@ public static class SchemaUpgrade
             );
             """,
             """
+            CREATE TABLE IF NOT EXISTS TenantProjects (
+                Id TEXT NOT NULL PRIMARY KEY, TenantId TEXT NOT NULL, Name TEXT NOT NULL,
+                Code TEXT NOT NULL, Description TEXT NOT NULL, SortOrder INTEGER NOT NULL,
+                IsActive INTEGER NOT NULL, CreatedAt TEXT NOT NULL,
+                FOREIGN KEY (TenantId) REFERENCES Tenants(Id) ON DELETE CASCADE
+            );
+            """,
+            """
             CREATE TABLE IF NOT EXISTS ComplaintAttachments (
                 Id TEXT NOT NULL PRIMARY KEY, TenantId TEXT NOT NULL, ComplaintId TEXT NOT NULL,
                 CommentId TEXT NULL, UploaderMembershipId TEXT NOT NULL, FileName TEXT NOT NULL,
@@ -143,11 +160,59 @@ public static class SchemaUpgrade
             "CREATE INDEX IF NOT EXISTS IX_Notifications_TenantId_MembershipId_IsRead_CreatedAt ON Notifications(TenantId, MembershipId, IsRead, CreatedAt);",
             "CREATE UNIQUE INDEX IF NOT EXISTS IX_PublicMembers_TenantId_Cnic ON PublicMembers(TenantId, Cnic);",
             "CREATE UNIQUE INDEX IF NOT EXISTS IX_PublicMembers_MembershipId ON PublicMembers(MembershipId);",
+            "CREATE UNIQUE INDEX IF NOT EXISTS IX_TenantProjects_TenantId_Name ON TenantProjects(TenantId, Name);",
+            "CREATE UNIQUE INDEX IF NOT EXISTS IX_TenantProjects_TenantId_Code ON TenantProjects(TenantId, Code);",
             "CREATE INDEX IF NOT EXISTS IX_ComplaintAttachments_TenantId_ComplaintId ON ComplaintAttachments(TenantId, ComplaintId);"
         };
 
         foreach (var statement in statements) await db.Database.ExecuteSqlRawAsync(statement);
+        await EnsureColumnAsync(db, connection, "PublicMembers", "WhatsAppNumber", "TEXT NOT NULL DEFAULT ''");
+        await EnsureColumnAsync(db, connection, "PublicMembers", "ProjectId", "TEXT NULL");
+        await EnsureColumnAsync(db, connection, "PublicMembers", "NotifyByEmail", "INTEGER NOT NULL DEFAULT 1");
+        await EnsureColumnAsync(db, connection, "PublicMembers", "NotifyByWhatsApp", "INTEGER NOT NULL DEFAULT 0");
+        await db.Database.ExecuteSqlRawAsync("UPDATE PublicMembers SET WhatsAppNumber = Phone WHERE WhatsAppNumber = ''; ");
+        await db.Database.ExecuteSqlRawAsync("UPDATE TenantRoles SET CanReceiveAssignments = 1 WHERE Name IN ('Society Administrator','Manager','Supervisor');");
+        await SeedDefaultProjectsAsync(db);
         await SeedDefaultCategoriesAsync(db);
+    }
+
+    private static async Task EnsureColumnAsync(AppDbContext db, System.Data.Common.DbConnection connection, string table, string column, string definition)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"PRAGMA table_info('{table}');";
+        await using var reader = await command.ExecuteReaderAsync();
+        var exists = false;
+        while (await reader.ReadAsync()) exists |= string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase);
+        await reader.DisposeAsync();
+        if (!exists)
+        {
+            await using var alter = connection.CreateCommand();
+            alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {definition};";
+            await alter.ExecuteNonQueryAsync();
+        }
+    }
+
+    private static async Task SeedDefaultProjectsAsync(AppDbContext db)
+    {
+        var tenantIds = await db.Tenants.Select(x => x.Id).ToListAsync();
+        foreach (var tenantId in tenantIds)
+        {
+            if (await db.TenantProjects.AnyAsync(x => x.TenantId == tenantId)) continue;
+            db.TenantProjects.AddRange(
+                new TenantProject { TenantId = tenantId, Name = "Jinnah Gardens I", Code = "JGI", SortOrder = 1 },
+                new TenantProject { TenantId = tenantId, Name = "Jinnah Gardens II", Code = "JGII", SortOrder = 2 },
+                new TenantProject { TenantId = tenantId, Name = "Korang Town", Code = "KT", SortOrder = 3 },
+                new TenantProject { TenantId = tenantId, Name = "Korang Town Extension", Code = "KTExt", SortOrder = 4 });
+        }
+        await db.SaveChangesAsync();
+        var members = await db.PublicMembers.Where(x => x.ProjectId == null).ToListAsync();
+        var projects = await db.TenantProjects.ToListAsync();
+        foreach (var member in members)
+        {
+            var code = member.Phase switch { SocietyPhase.JGI => "JGI", SocietyPhase.JGII => "JGII", SocietyPhase.KTExt => "KTExt", _ => "KT" };
+            member.ProjectId = projects.FirstOrDefault(x => x.TenantId == member.TenantId && x.Code == code)?.Id;
+        }
+        await db.SaveChangesAsync();
     }
 
     private static async Task SeedDefaultCategoriesAsync(AppDbContext db)

@@ -92,7 +92,8 @@ public static class OperationsAdminEndpoints
     private static async Task<IResult> CreateRuleAsync(RuleRequest request, ClaimsPrincipal principal, AppDbContext db)
     {
         var (tenantId, _) = ComplaintEndpoints.Context(principal);
-        if (!await db.TenantMemberships.AnyAsync(x => x.Id == request.SupervisorMembershipId && x.TenantId == tenantId && x.Status == MembershipStatus.Active)) return Results.BadRequest(new { message = "Choose an active assignee." });
+        if (!await IsEligibleAssigneeAsync(db, tenantId, request.SupervisorMembershipId))
+            return Results.BadRequest(new { message = "Choose an active member whose role is enabled for complaint assignments." });
         var rule = new AssignmentRule { TenantId = tenantId, Name = request.Name.Trim(), CategoryId = request.CategoryId, LocationContains = request.LocationContains.Trim(), SupervisorMembershipId = request.SupervisorMembershipId, Order = request.Order, IsActive = request.IsActive };
         db.AssignmentRules.Add(rule); await db.SaveChangesAsync(); return Results.Created($"/api/assignment-rules/{rule.Id}", new { rule.Id });
     }
@@ -102,6 +103,8 @@ public static class OperationsAdminEndpoints
         var (tenantId, _) = ComplaintEndpoints.Context(principal);
         var rule = await db.AssignmentRules.SingleOrDefaultAsync(x => x.Id == id && x.TenantId == tenantId);
         if (rule is null) return Results.NotFound();
+        if (!await IsEligibleAssigneeAsync(db, tenantId, request.SupervisorMembershipId))
+            return Results.BadRequest(new { message = "Choose an active member whose role is enabled for complaint assignments." });
         rule.Name = request.Name.Trim(); rule.CategoryId = request.CategoryId; rule.LocationContains = request.LocationContains.Trim(); rule.SupervisorMembershipId = request.SupervisorMembershipId; rule.Order = request.Order; rule.IsActive = request.IsActive;
         await db.SaveChangesAsync(); return Results.NoContent();
     }
@@ -132,16 +135,26 @@ public static class OperationsAdminEndpoints
     private static async Task<IResult> EligibleAssigneesAsync(ClaimsPrincipal principal, AppDbContext db)
     {
         var (tenantId, _) = ComplaintEndpoints.Context(principal);
-        return Results.Ok(await db.TenantMemberships.Where(x => x.TenantId == tenantId && x.Status == MembershipStatus.Active)
-            .OrderBy(x => x.User.DisplayName).Select(x => new { x.Id, x.User.DisplayName, x.User.Email, x.UnitLabel }).ToListAsync());
+        return Results.Ok(await db.TenantMemberships
+            .Where(x => x.TenantId == tenantId && x.Status == MembershipStatus.Active &&
+                db.MembershipRoles.Any(role => role.MembershipId == x.Id && role.Role.IsActive && role.Role.CanReceiveAssignments))
+            .OrderBy(x => x.User.DisplayName)
+            .Select(x => new { x.Id, x.User.DisplayName, x.User.Email, x.UnitLabel,
+                roles = x.User == null ? Array.Empty<string>() : db.MembershipRoles.Where(role => role.MembershipId == x.Id).Select(role => role.Role.Name).ToArray() })
+            .ToListAsync());
     }
+
+    private static Task<bool> IsEligibleAssigneeAsync(AppDbContext db, Guid tenantId, Guid membershipId) =>
+        db.TenantMemberships.AnyAsync(x => x.Id == membershipId && x.TenantId == tenantId &&
+            x.Status == MembershipStatus.Active && db.MembershipRoles.Any(role =>
+                role.MembershipId == x.Id && role.Role.IsActive && role.Role.CanReceiveAssignments));
 
     private static async Task<IResult> ListAssignableRolesAsync(ClaimsPrincipal principal, AppDbContext db)
     {
         var (tenantId, _) = ComplaintEndpoints.Context(principal);
         return Results.Ok(await db.TenantRoles.Where(x => x.TenantId == tenantId)
             .OrderByDescending(x => x.IsActive).ThenBy(x => x.Name)
-            .Select(x => new { x.Id, x.Name, x.Description, x.IsSystem, x.IsActive, memberCount = x.Members.Count, permissionKeys = x.Permissions.Select(p => p.Permission.Key).ToArray() })
+            .Select(x => new { x.Id, x.Name, x.Description, x.IsSystem, x.IsActive, x.CanReceiveAssignments, memberCount = x.Members.Count, permissionKeys = x.Permissions.Select(p => p.Permission.Key).ToArray() })
             .ToListAsync());
     }
 
@@ -163,6 +176,9 @@ public static class OperationsAdminEndpoints
         var roleIds = await db.TenantRoles.Where(x => x.TenantId == tenantId && x.IsActive && request.RoleIds.Contains(x.Id)).Select(x => x.Id).ToListAsync(cancellationToken);
         if (roleIds.Count == 0) return Results.ValidationProblem(new Dictionary<string, string[]> { ["roleIds"] = ["Select at least one active role."] });
         var tenant = await db.Tenants.SingleAsync(x => x.Id == tenantId, cancellationToken);
+        var staffCount = await db.TenantMemberships.CountAsync(x => x.TenantId == tenantId && x.Status != MembershipStatus.Deleted && !db.PublicMembers.Any(publicMember => publicMember.MembershipId == x.Id), cancellationToken);
+        if (staffCount >= tenant.StaffLimit)
+            return Results.Problem("This society has reached its staff allowance. Ask the SukoonDesk administrator to update the subscription.", statusCode: StatusCodes.Status403Forbidden);
         var email = request.Email.Trim().ToLowerInvariant();
         var user = await userManager.FindByEmailAsync(email);
         var previousMembership = user is null ? null : await db.TenantMemberships.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.UserId == user.Id, cancellationToken);

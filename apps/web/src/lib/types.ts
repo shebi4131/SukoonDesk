@@ -24,6 +24,7 @@ export type Role = {
   description: string
   isSystem: boolean
   isActive: boolean
+  canReceiveAssignments: boolean
   memberCount: number
   permissionKeys: string[]
 }
@@ -125,12 +126,15 @@ export type Attachment = { id: string; fileName: string; contentType: string; si
 export type PublicMember = {
   id: string
   fullName: string
-  phone: string
+  whatsAppNumber: string
   email: string
   plotNo: string
   streetNo: string
   block: string
-  phase: string
+  projectId: string | null
+  project: { id: string; name: string; code: string } | null
+  notifyByEmail: boolean
+  notifyByWhatsApp: boolean
   tenant: { id: string; name: string; slug: string }
 }
 
@@ -138,7 +142,7 @@ export type PublicSociety = {
   id: string
   name: string
   slug: string
-  phases: string[]
+  projects: Array<{ id: string; name: string; code: string; description: string }>
   categories: Array<{ id: string; name: string; description: string; color: string; defaultSlaHours: number }>
 }
 
