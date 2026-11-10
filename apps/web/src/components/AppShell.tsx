@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { BarChart3, Bell, Building2, CheckCheck, ChevronDown, LayoutDashboard, LogOut, Menu, MessageSquareText, PanelLeftClose, PanelLeftOpen, Settings, Shield, Tags, UserRoundCog, Users, X } from 'lucide-react'
+import { BarChart3, Bell, Building2, CheckCheck, ChevronDown, LayoutDashboard, LogOut, MapPinned, Menu, MessageSquareText, PanelLeftClose, PanelLeftOpen, Settings, Shield, Tags, UserRoundCog, Users, X } from 'lucide-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '../auth/auth-context'
 import { Brand } from './Brand'
@@ -14,6 +14,7 @@ const navigation = [
   { to: '/app/people', label: 'Residents & team', icon: Users, permission: 'users.view' },
   { to: '/app/reports', label: 'Reports', icon: BarChart3, permission: 'reports.view' },
   { to: '/app/categories', label: 'Categories & routing', icon: Tags, permission: 'settings.view' },
+  { to: '/app/projects', label: 'Projects & phases', icon: MapPinned, permission: 'settings.view' },
   { to: '/app/roles', label: 'Roles & access', icon: Shield, permission: 'roles.view' },
   { to: '/app/settings', label: 'Settings', icon: Settings, permission: 'settings.view' },
 ]

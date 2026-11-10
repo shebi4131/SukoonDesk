@@ -17,11 +17,35 @@ public sealed class Tenant
     public required string Name { get; set; }
     public required string Slug { get; set; }
     public bool IsActive { get; set; } = true;
+    public SubscriptionPlan SubscriptionPlan { get; set; } = SubscriptionPlan.Professional;
+    public SubscriptionStatus SubscriptionStatus { get; set; } = SubscriptionStatus.Active;
+    public DateTimeOffset? TrialEndsAt { get; set; }
+    public DateTimeOffset? SubscriptionEndsAt { get; set; }
+    public int ResidentLimit { get; set; } = 2000;
+    public int StaffLimit { get; set; } = 50;
+    public int MonthlyComplaintLimit { get; set; } = 5000;
+    public string BillingNotes { get; set; } = string.Empty;
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
+public enum SubscriptionPlan { Trial, Starter, Professional, Business, Enterprise, Perpetual }
+public enum SubscriptionStatus { Trial, Active, PastDue, Suspended, Expired }
+
 public enum MembershipStatus { Pending, Active, Suspended, Rejected, Deleted }
 public enum SocietyPhase { JGI, JGII, KT, KTExt }
+
+public sealed class TenantProject
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid TenantId { get; set; }
+    public Tenant Tenant { get; set; } = null!;
+    public required string Name { get; set; }
+    public string Code { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public int SortOrder { get; set; }
+    public bool IsActive { get; set; } = true;
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
 
 public sealed class TenantMembership
 {
@@ -45,11 +69,16 @@ public sealed class PublicMember
     public required string Cnic { get; set; }
     public required string FullName { get; set; }
     public required string Phone { get; set; }
+    public string WhatsAppNumber { get; set; } = string.Empty;
     public required string Email { get; set; }
     public required string PlotNo { get; set; }
     public required string StreetNo { get; set; }
     public string Block { get; set; } = string.Empty;
     public SocietyPhase Phase { get; set; }
+    public Guid? ProjectId { get; set; }
+    public TenantProject? Project { get; set; }
+    public bool NotifyByEmail { get; set; } = true;
+    public bool NotifyByWhatsApp { get; set; }
     public bool IsActive { get; set; } = true;
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
@@ -63,6 +92,7 @@ public sealed class TenantRole
     public string Description { get; set; } = string.Empty;
     public bool IsSystem { get; set; }
     public bool IsActive { get; set; } = true;
+    public bool CanReceiveAssignments { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public ICollection<RolePermission> Permissions { get; set; } = [];
     public ICollection<MembershipRole> Members { get; set; } = [];

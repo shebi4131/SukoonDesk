@@ -77,14 +77,17 @@ public static class InsightEndpoints
             .Include(x => x.Category).Include(x => x.CreatedByMembership).ThenInclude(x => x.User)
             .Include(x => x.AssignedToMembership).ThenInclude(x => x!.User).ToListAsync();
         var publicMembers = await db.PublicMembers.AsNoTracking().Where(x => x.TenantId == tenantId).ToListAsync();
+        var projects = await db.TenantProjects.AsNoTracking().Where(x => x.TenantId == tenantId && x.IsActive).OrderBy(x => x.SortOrder).ThenBy(x => x.Name).ToListAsync();
+        var projectNames = projects.ToDictionary(x => x.Id, x => x.Name);
         var publicByMembership = publicMembers.ToDictionary(x => x.MembershipId);
         var filtered = rows.Where(x => x.CreatedAt >= start && x.CreatedAt < end).ToList();
         if (Enum.TryParse<ComplaintStatus>(status, true, out var parsedStatus)) filtered = filtered.Where(x => x.Status == parsedStatus).ToList();
         if (categoryId.HasValue) filtered = filtered.Where(x => x.CategoryId == categoryId).ToList();
         if (Enum.TryParse<ComplaintPriority>(priority, true, out var parsedPriority)) filtered = filtered.Where(x => x.Priority == parsedPriority).ToList();
-        if (Enum.TryParse<SocietyPhase>(phase, true, out var parsedPhase))
+        if (!string.IsNullOrWhiteSpace(phase))
         {
-            var memberships = publicMembers.Where(x => x.Phase == parsedPhase).Select(x => x.MembershipId).ToHashSet();
+            var projectIds = projects.Where(x => x.Name.Equals(phase, StringComparison.OrdinalIgnoreCase) || x.Code.Equals(phase, StringComparison.OrdinalIgnoreCase)).Select(x => x.Id).ToHashSet();
+            var memberships = publicMembers.Where(x => x.ProjectId.HasValue && projectIds.Contains(x.ProjectId.Value)).Select(x => x.MembershipId).ToHashSet();
             filtered = filtered.Where(x => memberships.Contains(x.CreatedByMembershipId)).ToList();
         }
 
@@ -95,8 +98,9 @@ public static class InsightEndpoints
         var byStatus = filtered.GroupBy(x => x.Status).Select(x => new ReportSlice(x.Key.ToString(), x.Count())).OrderByDescending(x => x.Value).ToList();
         var byCategory = filtered.GroupBy(x => new { x.CategoryId, x.Category.Name }).Select(x => new ReportSlice(x.Key.Name, x.Count(), x.Key.CategoryId)).OrderByDescending(x => x.Value).ToList();
         var byPriority = filtered.GroupBy(x => x.Priority).Select(x => new ReportSlice(x.Key.ToString(), x.Count())).OrderByDescending(x => x.Value).ToList();
-        var byPhase = filtered.Where(x => publicByMembership.ContainsKey(x.CreatedByMembershipId)).GroupBy(x => publicByMembership[x.CreatedByMembershipId].Phase)
-            .Select(x => new ReportSlice(x.Key.ToString(), x.Count())).OrderByDescending(x => x.Value).ToList();
+        var byPhase = filtered.Where(x => publicByMembership.TryGetValue(x.CreatedByMembershipId, out var member) && member.ProjectId.HasValue && projectNames.ContainsKey(member.ProjectId.Value))
+            .GroupBy(x => projectNames[publicByMembership[x.CreatedByMembershipId].ProjectId!.Value])
+            .Select(x => new ReportSlice(x.Key, x.Count())).OrderByDescending(x => x.Value).ToList();
         var byAssignee = filtered.GroupBy(x => x.AssignedToMembership?.User.DisplayName ?? "Unassigned")
             .Select(x => new ReportSlice(x.Key, x.Count())).OrderByDescending(x => x.Value).ToList();
         var trend = Enumerable.Range(0, 12).Reverse().Select(offset =>
@@ -123,6 +127,6 @@ public static class InsightEndpoints
             resolved.Count == 0 ? 0 : Math.Round(resolved.Average(x => (x.ResolvedAt!.Value - x.CreatedAt).TotalHours), 1),
             feedback.Count == 0 ? 0 : Math.Round(feedback.Average(), 1));
         return new ReportData(tenant.Name, start, end.AddDays(-1), totals, byStatus, byCategory, byPriority, byPhase, byAssignee, backlog, trend, recent,
-            categories.Cast<object>().ToList(), Enum.GetNames<ComplaintStatus>(), Enum.GetNames<ComplaintPriority>(), Enum.GetNames<SocietyPhase>());
+            categories.Cast<object>().ToList(), Enum.GetNames<ComplaintStatus>(), Enum.GetNames<ComplaintPriority>(), projects.Select(x => x.Name).ToArray());
     }
 }
