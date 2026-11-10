@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useForm, useWatch } from 'react-hook-form'
 import { z } from 'zod'
 import { ArrowLeft, Check, Eye, EyeOff } from 'lucide-react'
-import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useState } from 'react'
 import { Brand } from '../components/Brand'
 import { api, ApiError } from '../lib/api'
@@ -55,8 +55,10 @@ function AuthLayout({ title, intro, children, quote, storyName = 'SukoonDesk Adm
 export function SignInPage() {
   const { user, completeSignIn } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
-  const societySlug = searchParams.get('society')?.trim().toLowerCase() ?? ''
+  const platformMode = location.pathname === '/platform-sign-in'
+  const societySlug = platformMode ? 'sukoondesk-admin' : (searchParams.get('society')?.trim().toLowerCase() ?? '')
   const [showPassword, setShowPassword] = useState(false)
   const [serverError, setServerError] = useState('')
   const [forgotOpen, setForgotOpen] = useState(false)
@@ -66,12 +68,14 @@ export function SignInPage() {
     resolver: zodResolver(signInSchema),
     defaultValues: { rememberMe: true },
   })
-  const { data: selectedSociety, isLoading: loadingSociety, isError: invalidSociety } = useQuery({
+  const { data: queriedSociety, isLoading: loadingSociety, isError: societyLookupFailed } = useQuery({
     queryKey: ['staff-sign-in-society', societySlug],
     queryFn: () => api<{ name: string; slug: string }>(`/api/public/societies/${societySlug}`),
-    enabled: !!societySlug,
+    enabled: !!societySlug && !platformMode,
     retry: false,
   })
+  const selectedSociety = platformMode ? { name: 'SukoonDesk Administration', slug: 'sukoondesk-admin' } : queriedSociety
+  const invalidSociety = !platformMode && societyLookupFailed
   if (user) return <Navigate to="/app" replace />
 
   const selectSociety = (society: SocietySearchResult) => {
@@ -100,9 +104,10 @@ export function SignInPage() {
   const submit = async (values: SignInValues) => {
     setServerError('')
     try {
-      const authenticatedUser = await api<CurrentUser>('/api/auth/sign-in', { method: 'POST', body: JSON.stringify({ ...values, societySlug, email: values.email.trim().toLowerCase() }) })
+      await api<CurrentUser>('/api/auth/sign-in', { method: 'POST', body: JSON.stringify({ ...values, societySlug, email: values.email.trim().toLowerCase() }) })
+      const authenticatedUser = await api<CurrentUser>('/api/auth/me')
       completeSignIn(authenticatedUser)
-      navigate('/app', { replace: true })
+      navigate(authenticatedUser.isPlatformAdmin ? '/app/platform' : '/app', { replace: true })
     } catch (error) {
       setServerError(error instanceof ApiError ? (error.status === 401 ? 'Email or password is incorrect for this society.' : error.message) : 'We could not sign you in. Please try again.')
     }
@@ -119,7 +124,7 @@ export function SignInPage() {
     <form className="auth-form" onSubmit={recoverPassword}>
       {serverError && <div className="form-alert">{serverError}</div>}{forgotMessage && <div className="form-alert success">{forgotMessage}</div>}
       <input type="hidden" name="societySlug" value={societySlug} />
-      <div className="selected-society"><span>{selectedSociety.name.charAt(0)}</span><div><strong>{selectedSociety.name}</strong><small>{selectedSociety.slug}</small></div><button type="button" onClick={changeSociety}>Change</button></div>
+      <div className="selected-society"><span>{selectedSociety.name.charAt(0)}</span><div><strong>{selectedSociety.name}</strong><small>{selectedSociety.slug}</small></div>{!platformMode && <button type="button" onClick={changeSociety}>Change</button>}</div>
       <label>Email address<input name="email" type="email" required placeholder="you@example.com" /></label>
       <button className="button button-primary button-block" disabled={forgotBusy}>{forgotBusy ? 'Sending…' : 'Email new password'}</button>
       <button type="button" className="text-button auth-back" onClick={() => { setForgotOpen(false); setServerError(''); setForgotMessage('') }}>Back to sign in</button>
@@ -129,7 +134,7 @@ export function SignInPage() {
   return <AuthLayout title={`${selectedSociety.name} staff sign in`} intro="For society administrators, managers, supervisors, and authorized staff." quote={selectedSociety.slug === 'fechs' ? 'Our team finally has one place to see what needs attention and who owns it.' : `Welcome to ${selectedSociety.name}. Sign in to manage community concerns and follow every resolution.`} {...societyStory}>
     <form className="auth-form" onSubmit={handleSubmit(submit)}>
       {serverError && <div className="form-alert">{serverError}</div>}
-      <div className="selected-society"><span>{selectedSociety.name.charAt(0)}</span><div><strong>{selectedSociety.name}</strong><small>{selectedSociety.slug}</small></div><button type="button" onClick={changeSociety}>Change</button></div>
+      <div className="selected-society"><span>{selectedSociety.name.charAt(0)}</span><div><strong>{selectedSociety.name}</strong><small>{selectedSociety.slug}</small></div>{!platformMode && <button type="button" onClick={changeSociety}>Change</button>}</div>
       <label>Email address<input {...register('email')} type="email" placeholder="you@example.com" />{errors.email && <small className="field-error">{errors.email.message}</small>}</label>
       <label>Password<div className="password-input"><input {...register('password')} type={showPassword ? 'text' : 'password'} placeholder="Enter your password" /><button type="button" onClick={() => setShowPassword(x => !x)} aria-label="Toggle password">{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button></div>{errors.password && <small className="field-error">{errors.password.message}</small>}</label>
       <div className="form-options"><label className="check-label"><input type="checkbox" {...register('rememberMe')} /> Keep me signed in</label><button type="button" className="link-button" onClick={() => setForgotOpen(true)}>Forgot password?</button></div>

@@ -1,38 +1,24 @@
-import { useMemo, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, LockKeyhole, Pencil, Plus, Search, Shield, Trash2, X } from 'lucide-react'
-import { api, ApiError } from '../lib/api'
-import type { Permission, Role } from '../lib/types'
+import { useMemo,useState } from 'react'
+import { useMutation,useQuery,useQueryClient } from '@tanstack/react-query'
+import { Check,LockKeyhole,Pencil,Plus,Search,Shield,Trash2,X } from 'lucide-react'
+import { api,ApiError } from '../lib/api'
+import type { Permission,Role } from '../lib/types'
 import { useAuth } from '../auth/auth-context'
 
-type RoleDraft = { id?: string; name: string; description: string; isActive: boolean; permissionKeys: string[]; isSystem?: boolean }
-const emptyRole: RoleDraft = { name: '', description: '', isActive: true, permissionKeys: [] }
+type Draft={id?:string;name:string;description:string;isActive:boolean;canReceiveAssignments:boolean;permissionKeys:string[];isSystem?:boolean}
+const empty:Draft={name:'',description:'',isActive:true,canReceiveAssignments:false,permissionKeys:[]}
 
-export function RolesPage() {
-  const queryClient = useQueryClient()
-  const { hasPermission } = useAuth()
-  const canManage = hasPermission('roles.manage')
-  const [search, setSearch] = useState('')
-  const [draft, setDraft] = useState<RoleDraft | null>(null)
-  const [error, setError] = useState('')
-  const roles = useQuery({ queryKey: ['roles'], queryFn: () => api<Role[]>('/api/rbac/roles') })
-  const permissions = useQuery({ queryKey: ['permissions'], queryFn: () => api<Permission[]>('/api/rbac/permissions') })
-  const save = useMutation({
-    mutationFn: (value: RoleDraft) => api<void>(value.id ? `/api/rbac/roles/${value.id}` : '/api/rbac/roles', { method: value.id ? 'PUT' : 'POST', body: JSON.stringify(value) }),
-    onSuccess: async () => { setDraft(null); await queryClient.invalidateQueries({ queryKey: ['roles'] }) },
-    onError: (e) => setError(e instanceof ApiError ? e.message : 'Could not save this role.'),
-  })
-  const remove = useMutation({ mutationFn: (id: string) => api<void>(`/api/rbac/roles/${id}`, { method: 'DELETE' }), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['roles'] }) })
-  const groups = useMemo(() => (permissions.data ?? []).reduce<Record<string, Permission[]>>((result, item) => {
-    ;(result[item.group] ??= []).push(item)
-    return result
-  }, {}), [permissions.data])
-  const filtered = (roles.data ?? []).filter(role => `${role.name} ${role.description}`.toLowerCase().includes(search.toLowerCase()))
-  const togglePermission = (key: string) => setDraft(current => current ? ({ ...current, permissionKeys: current.permissionKeys.includes(key) ? current.permissionKeys.filter(x => x !== key) : [...current.permissionKeys, key] }) : current)
-
-  return <>
-    <div className="page-heading"><div><p className="breadcrumb">Administration / Access control</p><h1>Roles & permissions</h1><p>Control what residents, supervisors, and administrators can see and do.</p></div>{canManage && <button className="button button-primary" onClick={() => setDraft(emptyRole)}><Plus size={18} /> New role</button>}</div>
-    <section className="panel table-panel"><div className="table-toolbar"><div className="search-box"><Search size={18} /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search roles…" /></div><span>{filtered.length} roles</span></div><div className="role-table"><div className="role-table-head"><span>Role</span><span>Members</span><span>Permissions</span><span>Status</span><span /></div>{filtered.map(role => <div className="role-table-row" key={role.id}><div className="role-name"><span className={`role-icon ${role.isSystem ? 'system' : ''}`}>{role.isSystem ? <LockKeyhole size={18} /> : <Shield size={18} />}</span><span><strong>{role.name}</strong><small>{role.description}</small></span>{role.isSystem && <em>System</em>}</div><span>{role.memberCount}</span><span>{role.permissionKeys.length} permissions</span><span><i className={`status-badge ${role.isActive ? 'active' : ''}`}>{role.isActive ? 'Active' : 'Inactive'}</i></span><div className="row-actions">{canManage && <><button onClick={() => setDraft({ ...role })}><Pencil size={17} /></button>{!role.isSystem && <button onClick={() => remove.mutate(role.id)}><Trash2 size={17} /></button>}</>}</div></div>)}</div></section>
-    {draft && <div className="drawer-layer"><button className="drawer-scrim" onClick={() => setDraft(null)} aria-label="Close editor" /><aside className="drawer"><div className="drawer-header"><div><p className="kicker">Access control</p><h2>{draft.id ? 'Edit role' : 'Create role'}</h2></div><button className="icon-button" onClick={() => setDraft(null)}><X size={20} /></button></div><div className="drawer-body">{error && <div className="form-alert">{error}</div>}<label>Role name<input value={draft.name} onChange={e => setDraft({ ...draft, name: e.target.value })} placeholder="e.g. Maintenance Supervisor" /></label><label>Description<textarea value={draft.description} onChange={e => setDraft({ ...draft, description: e.target.value })} rows={3} /></label><div className="permission-heading"><div><strong>Permissions</strong><small>{draft.permissionKeys.length} selected</small></div><button className="text-button" onClick={() => setDraft({ ...draft, permissionKeys: permissions.data?.map(x => x.key) ?? [] })}>Select all</button></div><div className="permission-groups">{Object.entries(groups).map(([group, items]) => <section key={group}><h3>{group}</h3>{items?.map(permission => <label className="permission-row" key={permission.key}><button type="button" className={`custom-check ${draft.permissionKeys.includes(permission.key) ? 'checked' : ''}`} onClick={() => togglePermission(permission.key)}>{draft.permissionKeys.includes(permission.key) && <Check size={14} />}</button><span><strong>{permission.name}</strong><small>{permission.description}</small></span></label>)}</section>)}</div></div><div className="drawer-footer"><button className="button button-ghost" onClick={() => setDraft(null)}>Cancel</button><button className="button button-primary" disabled={!draft.name.trim() || save.isPending} onClick={() => save.mutate(draft)}>{save.isPending ? 'Saving…' : 'Save role'}</button></div></aside></div>}
-  </>
+export function RolesPage(){
+ const client=useQueryClient(),{hasPermission}=useAuth(),canManage=hasPermission('roles.manage')
+ const [search,setSearch]=useState(''),[draft,setDraft]=useState<Draft|null>(null),[error,setError]=useState('')
+ const roles=useQuery({queryKey:['roles'],queryFn:()=>api<Role[]>('/api/rbac/roles')})
+ const permissions=useQuery({queryKey:['permissions'],queryFn:()=>api<Permission[]>('/api/rbac/permissions')})
+ const save=useMutation({mutationFn:(x:Draft)=>api<void>(x.id?`/api/rbac/roles/${x.id}`:'/api/rbac/roles',{method:x.id?'PUT':'POST',body:JSON.stringify(x)}),onSuccess:async()=>{setDraft(null);await client.invalidateQueries({queryKey:['roles']})},onError:e=>setError(e instanceof ApiError?e.message:'Could not save this role.')})
+ const remove=useMutation({mutationFn:(id:string)=>api<void>(`/api/rbac/roles/${id}`,{method:'DELETE'}),onSuccess:()=>client.invalidateQueries({queryKey:['roles']})})
+ const groups=useMemo(()=>(permissions.data??[]).reduce<Record<string,Permission[]>>((a,x)=>{(a[x.group]??=[]).push(x);return a},{}),[permissions.data])
+ const filtered=(roles.data??[]).filter(x=>`${x.name} ${x.description}`.toLowerCase().includes(search.toLowerCase()))
+ const toggle=(key:string)=>setDraft(x=>x?({...x,permissionKeys:x.permissionKeys.includes(key)?x.permissionKeys.filter(p=>p!==key):[...x.permissionKeys,key]}):x)
+ return <><div className="page-heading"><div><p className="breadcrumb">Administration / Access control</p><h1>Roles & permissions</h1><p>Control access and exactly which roles can receive complaint assignments.</p></div>{canManage&&<button className="button button-primary" onClick={()=>setDraft(empty)}><Plus/> New role</button>}</div>
+ <section className="panel table-panel"><div className="table-toolbar"><div className="search-box"><Search/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search roles…"/></div><span>{filtered.length} roles</span></div><div className="role-table"><div className="role-table-head"><span>Role</span><span>Members</span><span>Permissions</span><span>Status</span><span/></div>{filtered.map(role=><div className="role-table-row" key={role.id}><div className="role-name"><span className={`role-icon ${role.isSystem?'system':''}`}>{role.isSystem?<LockKeyhole/>:<Shield/>}</span><span><strong>{role.name}</strong><small>{role.description}</small></span>{role.isSystem&&<em>System</em>}</div><span>{role.memberCount}</span><span>{role.permissionKeys.length} permissions{role.canReceiveAssignments?<em className="assignable-badge">Assignable</em>:null}</span><span><i className={`status-badge ${role.isActive?'active':''}`}>{role.isActive?'Active':'Inactive'}</i></span><div className="row-actions">{canManage&&<><button onClick={()=>{setError('');setDraft({...role})}}><Pencil/></button>{!role.isSystem&&<button onClick={()=>remove.mutate(role.id)}><Trash2/></button>}</>}</div></div>)}</div></section>
+ {draft&&<div className="drawer-layer"><button className="drawer-scrim" onClick={()=>setDraft(null)}/><aside className="drawer"><div className="drawer-header"><div><p className="kicker">Access control</p><h2>{draft.id?'Edit role':'Create role'}</h2></div><button className="icon-button" onClick={()=>setDraft(null)}><X/></button></div><div className="drawer-body">{error&&<div className="form-alert">{error}</div>}<label>Role name<input value={draft.name} onChange={e=>setDraft({...draft,name:e.target.value})}/></label><label>Description<textarea rows={3} value={draft.description} onChange={e=>setDraft({...draft,description:e.target.value})}/></label><label className="toggle-row"><span><strong>Can receive complaint assignments</strong><small>Members with this role appear in manual assignment and routing lists.</small></span><input type="checkbox" checked={draft.canReceiveAssignments} onChange={e=>setDraft({...draft,canReceiveAssignments:e.target.checked})}/></label><div className="permission-heading"><div><strong>Permissions</strong><small>{draft.permissionKeys.length} selected</small></div><button className="text-button" onClick={()=>setDraft({...draft,permissionKeys:permissions.data?.map(x=>x.key)??[]})}>Select all</button></div><div className="permission-groups">{Object.entries(groups).map(([group,items])=><section key={group}><h3>{group}</h3>{items.map(p=><label className="permission-row" key={p.key}><button type="button" className={`custom-check ${draft.permissionKeys.includes(p.key)?'checked':''}`} onClick={()=>toggle(p.key)}>{draft.permissionKeys.includes(p.key)&&<Check/>}</button><span><strong>{p.name}</strong><small>{p.description}</small></span></label>)}</section>)}</div></div><div className="drawer-footer"><button className="button button-ghost" onClick={()=>setDraft(null)}>Cancel</button><button className="button button-primary" disabled={!draft.name.trim()||save.isPending} onClick={()=>save.mutate(draft)}>{save.isPending?'Saving…':'Save role'}</button></div></aside></div>}</>
 }

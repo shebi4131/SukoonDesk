@@ -101,15 +101,18 @@ public static class ComplaintEndpoints
         return Results.Ok(complaint);
     }
 
-    private static async Task<IResult> CreateAsync(CreateComplaintRequest request, ClaimsPrincipal principal, AppDbContext db)
+    private static async Task<IResult> CreateAsync(CreateComplaintRequest request, ClaimsPrincipal principal, AppDbContext db, NotificationDispatcher notifications, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.Title) || string.IsNullOrWhiteSpace(request.Description))
             return Results.ValidationProblem(new Dictionary<string, string[]> { ["complaint"] = ["Title and description are required."] });
         var (tenantId, membershipId) = Context(principal);
+        var tenant = await db.Tenants.SingleAsync(x => x.Id == tenantId);
+        var now = DateTimeOffset.UtcNow;
+        if (await TenantAccess.MonthlyComplaintCountAsync(db, tenantId, now, cancellationToken) >= tenant.MonthlyComplaintLimit)
+            return Results.Problem("The monthly complaint allowance has been reached.", statusCode: StatusCodes.Status403Forbidden);
         var category = await db.ComplaintCategories.SingleOrDefaultAsync(x => x.Id == request.CategoryId && x.TenantId == tenantId && x.IsActive);
         if (category is null) return Results.ValidationProblem(new Dictionary<string, string[]> { ["categoryId"] = ["Select a valid category."] });
 
-        var now = DateTimeOffset.UtcNow;
         var createdDates = await db.Complaints.Where(x => x.TenantId == tenantId).Select(x => x.CreatedAt).ToListAsync();
         var sequence = createdDates.Count(x => x.Year == now.Year) + 1;
         var rule = await db.AssignmentRules.Include(x => x.SupervisorMembership)
@@ -140,7 +143,7 @@ public static class ComplaintEndpoints
         });
         AddNotification(db, tenantId, membershipId, "Complaint received", $"{complaint.Number} has been submitted.", "success", $"/app/complaints/{complaint.Id}");
         if (assignedId.HasValue)
-            AddNotification(db, tenantId, assignedId.Value, "New complaint assigned", $"{complaint.Number}: {complaint.Title}", "assignment", $"/app/complaints/{complaint.Id}");
+            await notifications.NotifyAsync(tenantId, assignedId.Value, "New complaint assigned", $"{complaint.Number}: {complaint.Title}", "assignment", $"/app/complaints/{complaint.Id}", true, true, cancellationToken);
         await db.SaveChangesAsync();
         return Results.Created($"/api/complaints/{complaint.Id}", new { complaint.Id, complaint.Number });
     }
@@ -238,7 +241,7 @@ public static class ComplaintEndpoints
         return await PublicEndpoints.SaveAttachmentAsync(file, complaint, comment.Id, membershipId, db, storage, cancellationToken);
     }
 
-    private static async Task<IResult> ChangeStatusAsync(Guid id, StatusRequest request, ClaimsPrincipal principal, AppDbContext db)
+    private static async Task<IResult> ChangeStatusAsync(Guid id, StatusRequest request, ClaimsPrincipal principal, AppDbContext db, NotificationDispatcher notifications, CancellationToken cancellationToken)
     {
         var (tenantId, membershipId) = Context(principal);
         var complaint = await db.Complaints.SingleOrDefaultAsync(x => x.Id == id && x.TenantId == tenantId);
@@ -259,23 +262,26 @@ public static class ComplaintEndpoints
         if (request.Status == ComplaintStatus.Reopened) { complaint.ResolvedAt = null; complaint.ClosedAt = null; }
         db.ComplaintStatusEvents.Add(new ComplaintStatusEvent { TenantId = tenantId, ComplaintId = id, FromStatus = previous, ToStatus = request.Status, ChangedByMembershipId = membershipId, Note = request.Note?.Trim() ?? string.Empty });
         if (complaint.CreatedByMembershipId != membershipId)
-            AddNotification(db, tenantId, complaint.CreatedByMembershipId, "Complaint status updated", $"{complaint.Number} is now {Humanize(request.Status)}.", "status", $"/app/complaints/{id}");
+            await notifications.NotifyAsync(tenantId, complaint.CreatedByMembershipId, "Complaint status updated", $"{complaint.Number} is now {Humanize(request.Status)}.", "status", $"/app/complaints/{id}", true, true, cancellationToken);
         await db.SaveChangesAsync();
         return Results.NoContent();
     }
 
-    private static async Task<IResult> AssignAsync(Guid id, AssignmentRequest request, ClaimsPrincipal principal, AppDbContext db)
+    private static async Task<IResult> AssignAsync(Guid id, AssignmentRequest request, ClaimsPrincipal principal, AppDbContext db, NotificationDispatcher notifications, CancellationToken cancellationToken)
     {
         var (tenantId, membershipId) = Context(principal);
         var complaint = await db.Complaints.SingleOrDefaultAsync(x => x.Id == id && x.TenantId == tenantId);
-        var assignee = await db.TenantMemberships.Include(x => x.User).SingleOrDefaultAsync(x => x.Id == request.MembershipId && x.TenantId == tenantId && x.Status == MembershipStatus.Active);
+        var assignee = await db.TenantMemberships.Include(x => x.User).SingleOrDefaultAsync(x => x.Id == request.MembershipId && x.TenantId == tenantId && x.Status == MembershipStatus.Active &&
+            db.MembershipRoles.Any(role => role.MembershipId == x.Id && role.Role.IsActive && role.Role.CanReceiveAssignments));
         if (complaint is null || assignee is null) return Results.NotFound();
         var previous = complaint.Status;
+        var previousAssigneeId = complaint.AssignedToMembershipId;
         complaint.AssignedToMembershipId = assignee.Id;
         complaint.Status = complaint.Status is ComplaintStatus.Submitted or ComplaintStatus.Acknowledged ? ComplaintStatus.Assigned : complaint.Status;
         complaint.UpdatedAt = DateTimeOffset.UtcNow;
         db.ComplaintStatusEvents.Add(new ComplaintStatusEvent { TenantId = tenantId, ComplaintId = id, FromStatus = previous, ToStatus = complaint.Status, ChangedByMembershipId = membershipId, Note = $"Assigned to {assignee.User.DisplayName}. {request.Note}".Trim() });
-        AddNotification(db, tenantId, assignee.Id, "Complaint assigned to you", $"{complaint.Number}: {complaint.Title}", "assignment", $"/app/complaints/{id}");
+        if (previousAssigneeId != assignee.Id)
+            await notifications.NotifyAsync(tenantId, assignee.Id, "Complaint assigned to you", $"{complaint.Number}: {complaint.Title}", "assignment", $"/app/complaints/{id}", true, true, cancellationToken);
         await db.SaveChangesAsync();
         return Results.NoContent();
     }

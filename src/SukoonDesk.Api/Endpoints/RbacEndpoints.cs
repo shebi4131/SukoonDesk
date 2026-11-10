@@ -35,7 +35,7 @@ public static class RbacEndpoints
         var roles = await db.TenantRoles.Where(x => x.TenantId == tenantId)
             .OrderByDescending(x => x.IsSystem).ThenBy(x => x.Name)
             .Select(x => new RoleResponse(
-                x.Id, x.Name, x.Description, x.IsSystem, x.IsActive,
+                x.Id, x.Name, x.Description, x.IsSystem, x.IsActive, x.CanReceiveAssignments,
                 x.Members.Count,
                 x.Permissions.Select(p => p.Permission.Key).ToArray()))
             .ToListAsync();
@@ -56,7 +56,8 @@ public static class RbacEndpoints
             TenantId = tenantId,
             Name = request.Name.Trim(),
             Description = request.Description.Trim(),
-            IsActive = request.IsActive
+            IsActive = request.IsActive,
+            CanReceiveAssignments = request.CanReceiveAssignments
         };
         db.TenantRoles.Add(role);
         db.RolePermissions.AddRange(permissionIds.Select(x => new RolePermission { Role = role, PermissionId = x }));
@@ -78,6 +79,7 @@ public static class RbacEndpoints
         role.Name = request.Name.Trim();
         role.Description = request.Description.Trim();
         if (!role.IsSystem) role.IsActive = request.IsActive;
+        role.CanReceiveAssignments = request.CanReceiveAssignments;
         db.RolePermissions.RemoveRange(role.Permissions);
         var permissionIds = await db.Permissions.Where(x => request.PermissionKeys.Contains(x.Key)).Select(x => x.Id).ToListAsync();
         db.RolePermissions.AddRange(permissionIds.Select(x => new RolePermission { RoleId = role.Id, PermissionId = x }));
@@ -101,5 +103,5 @@ public static class RbacEndpoints
 }
 
 public sealed record PermissionResponse(Guid Id, string Key, string Name, string Group, string Description);
-public sealed record RoleResponse(Guid Id, string Name, string Description, bool IsSystem, bool IsActive, int MemberCount, string[] PermissionKeys);
-public sealed record RoleRequest(string Name, string Description, bool IsActive, string[] PermissionKeys);
+public sealed record RoleResponse(Guid Id, string Name, string Description, bool IsSystem, bool IsActive, bool CanReceiveAssignments, int MemberCount, string[] PermissionKeys);
+public sealed record RoleRequest(string Name, string Description, bool IsActive, bool CanReceiveAssignments, string[] PermissionKeys);

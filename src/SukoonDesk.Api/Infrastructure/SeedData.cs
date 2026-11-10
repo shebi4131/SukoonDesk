@@ -96,7 +96,8 @@ public static class SeedData
             TenantId = tenantId,
             Name = "Society Administrator",
             Description = "Full access to society configuration and operations.",
-            IsSystem = true
+            IsSystem = true,
+            CanReceiveAssignments = true
         };
         var resident = new TenantRole
         {
@@ -110,14 +111,16 @@ public static class SeedData
             TenantId = tenantId,
             Name = "Supervisor",
             Description = "Manage assigned complaints, replies, and status updates.",
-            IsSystem = true
+            IsSystem = true,
+            CanReceiveAssignments = true
         };
         var manager = new TenantRole
         {
             TenantId = tenantId,
             Name = "Manager",
             Description = "Oversee people, all complaints, routing, and performance reports.",
-            IsSystem = true
+            IsSystem = true,
+            CanReceiveAssignments = true
         };
 
         db.TenantRoles.AddRange(admin, resident, supervisor, manager);

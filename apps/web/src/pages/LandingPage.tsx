@@ -11,8 +11,8 @@ export function LandingPage() {
     <div className="marketing-page">
       <header className="marketing-nav shell">
         <Brand />
-        <nav><a href="#features">Features</a><a href="#workflow">How it works</a><a href="#security">Security</a></nav>
-        <div className="nav-actions"><Link to="/public" className="button button-ghost">Register complaint</Link><Link to="/sign-in" className="text-link">Staff sign in</Link><Link to="/sign-up" className="button button-primary">Start free</Link></div>
+        <nav><a href="#features">Features</a><a href="#workflow">How it works</a><Link to="/pricing">Pricing</Link><a href="#security">Security</a></nav>
+        <div className="nav-actions"><Link to="/public" className="button button-ghost">Register complaint</Link><Link to="/sign-in" className="text-link">Staff sign in</Link><Link to="/sign-up" className="button button-primary">Request access</Link></div>
       </header>
 
       <main>
@@ -22,7 +22,7 @@ export function LandingPage() {
             <h1>Every concern deserves a <em>clear resolution.</em></h1>
             <p>SukoonDesk brings residents, supervisors, and management together in one calm, accountable workspace.</p>
             <div className="hero-actions"><Link to="/public" className="button button-primary button-large">Register a complaint <ArrowRight size={18} /></Link><Link to="/sign-up" className="button button-ghost button-large">Create your society</Link></div>
-            <div className="hero-proof"><span><CheckCircle2 size={17} /> Free to start</span><span><CheckCircle2 size={17} /> Set up in minutes</span><span><CheckCircle2 size={17} /> No card required</span></div>
+            <div className="hero-proof"><span><CheckCircle2 size={17} /> Flexible plans</span><span><CheckCircle2 size={17} /> Set up in minutes</span><span><CheckCircle2 size={17} /> Guided onboarding</span></div>
           </div>
           <div className="hero-visual" aria-label="SukoonDesk dashboard preview">
             <div className="preview-glow" />

@@ -30,5 +30,13 @@ services:
         sync: false
       - key: Storage__Bucket
         sync: false
+      - key: WhatsApp__Provider
+        value: Disabled
+      - key: WhatsApp__AccessToken
+        sync: false
+      - key: WhatsApp__PhoneNumberId
+        sync: false
+      - key: WhatsApp__ApiVersion
+        value: v21.0
       - key: PlatformAdmin__Emails__0
         sync: false

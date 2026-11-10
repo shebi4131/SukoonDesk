@@ -66,7 +66,8 @@ builder.Services.ConfigureApplicationCookie(options =>
             var db = context.HttpContext.RequestServices.GetRequiredService<AppDbContext>();
             var tenantId = Guid.Parse(context.Principal.FindFirstValue("tenant_id")!);
             var membershipId = Guid.Parse(context.Principal.FindFirstValue("membership_id")!);
-            if (await db.Tenants.AnyAsync(x => x.Id == tenantId && x.IsActive) && await db.TenantMemberships.AnyAsync(x => x.Id == membershipId && x.Status == MembershipStatus.Active)) return;
+            var tenant = await db.Tenants.SingleOrDefaultAsync(x => x.Id == tenantId);
+            if (tenant is not null && TenantAccess.IsAvailable(tenant) && await db.TenantMemberships.AnyAsync(x => x.Id == membershipId && x.Status == MembershipStatus.Active)) return;
         }
 
         context.RejectPrincipal();
@@ -89,6 +90,9 @@ builder.Services.AddPermissionAuthorization();
 builder.Services.AddScoped<SettingService>();
 builder.Services.Configure<EmailOptions>(builder.Configuration.GetSection("Email"));
 builder.Services.AddHttpClient<IEmailSender, EmailSender>(client => client.Timeout = TimeSpan.FromSeconds(20));
+builder.Services.Configure<WhatsAppOptions>(builder.Configuration.GetSection("WhatsApp"));
+builder.Services.AddHttpClient<IWhatsAppSender, WhatsAppSender>(client => client.Timeout = TimeSpan.FromSeconds(20));
+builder.Services.AddScoped<NotificationDispatcher>();
 builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection("Storage"));
 if ((builder.Configuration["Storage:Provider"] ?? "Local").Equals("S3", StringComparison.OrdinalIgnoreCase))
     builder.Services.AddSingleton<IFileStorage, S3FileStorage>();
@@ -203,6 +207,7 @@ app.MapSettingEndpoints();
 app.MapDashboardEndpoints();
 app.MapComplaintEndpoints();
 app.MapOperationsAdminEndpoints();
+app.MapProjectEndpoints();
 app.MapInsightEndpoints();
 app.MapPublicEndpoints();
 
