@@ -126,7 +126,9 @@ public static class OperationsAdminEndpoints
             x.Id, x.UserId, x.User.DisplayName,
             email = db.PublicMembers.Where(p => p.MembershipId == x.Id).Select(p => p.Email).FirstOrDefault() ?? x.User.Email,
             cnic = db.PublicMembers.Where(p => p.MembershipId == x.Id).Select(p => p.Cnic).FirstOrDefault(),
-            x.User.PhoneNumber, x.UnitLabel, x.Status, x.JoinedAt,
+            phoneNumber = db.PublicMembers.Where(p => p.MembershipId == x.Id).Select(p => p.Phone).FirstOrDefault() ?? x.User.PhoneNumber,
+            whatsAppNumber = db.PublicMembers.Where(p => p.MembershipId == x.Id).Select(p => p.WhatsAppNumber).FirstOrDefault(),
+            x.UnitLabel, x.Status, x.JoinedAt,
             kind = db.MembershipRoles.Any(r => r.MembershipId == x.Id && r.Role.Name != "Resident") ? "Team" : "Resident",
             roles = db.MembershipRoles.Where(r => r.MembershipId == x.Id).Select(r => new { r.Role.Id, r.Role.Name }).ToArray()
         }).ToListAsync());
@@ -276,6 +278,8 @@ public static class OperationsAdminEndpoints
     private static async Task<IResult> UpdateMemberStatusAsync(Guid id, MemberStatusRequest request, ClaimsPrincipal principal, AppDbContext db)
     {
         var (tenantId, currentMembershipId) = ComplaintEndpoints.Context(principal);
+        if (request.Status is not (MembershipStatus.Active or MembershipStatus.Suspended))
+            return Results.BadRequest(new { message = "Use Active for approval, Suspended for temporary access removal, or Remove for permanent deletion." });
         if (id == currentMembershipId && request.Status != MembershipStatus.Active) return Results.BadRequest(new { message = "You cannot suspend your own membership." });
         var member = await db.TenantMemberships.SingleOrDefaultAsync(x => x.Id == id && x.TenantId == tenantId);
         if (member is null) return Results.NotFound(); member.Status = request.Status; await db.SaveChangesAsync(); return Results.NoContent();

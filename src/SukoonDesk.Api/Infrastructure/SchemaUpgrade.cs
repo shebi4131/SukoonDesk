@@ -158,7 +158,6 @@ public static class SchemaUpgrade
             "CREATE UNIQUE INDEX IF NOT EXISTS IX_ComplaintFeedback_ComplaintId ON ComplaintFeedback(ComplaintId);",
             "CREATE INDEX IF NOT EXISTS IX_AssignmentRules_TenantId_Order ON AssignmentRules(TenantId, \"Order\");",
             "CREATE INDEX IF NOT EXISTS IX_Notifications_TenantId_MembershipId_IsRead_CreatedAt ON Notifications(TenantId, MembershipId, IsRead, CreatedAt);",
-            "CREATE UNIQUE INDEX IF NOT EXISTS IX_PublicMembers_TenantId_Cnic ON PublicMembers(TenantId, Cnic);",
             "CREATE UNIQUE INDEX IF NOT EXISTS IX_PublicMembers_MembershipId ON PublicMembers(MembershipId);",
             "CREATE UNIQUE INDEX IF NOT EXISTS IX_TenantProjects_TenantId_Name ON TenantProjects(TenantId, Name);",
             "CREATE UNIQUE INDEX IF NOT EXISTS IX_TenantProjects_TenantId_Code ON TenantProjects(TenantId, Code);",
@@ -171,6 +170,11 @@ public static class SchemaUpgrade
         await EnsureColumnAsync(db, connection, "PublicMembers", "NotifyByEmail", "INTEGER NOT NULL DEFAULT 1");
         await EnsureColumnAsync(db, connection, "PublicMembers", "NotifyByWhatsApp", "INTEGER NOT NULL DEFAULT 0");
         await db.Database.ExecuteSqlRawAsync("UPDATE PublicMembers SET WhatsAppNumber = Phone WHERE WhatsAppNumber = ''; ");
+        await db.Database.ExecuteSqlRawAsync("DROP INDEX IF EXISTS IX_PublicMembers_TenantId_Cnic;");
+        await db.Database.ExecuteSqlRawAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_PublicMembers_Cnic ON PublicMembers(Cnic);");
+        await db.Database.ExecuteSqlRawAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_PublicMembers_Email ON PublicMembers(Email);");
+        await db.Database.ExecuteSqlRawAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_PublicMembers_Phone ON PublicMembers(Phone);");
+        await db.Database.ExecuteSqlRawAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_PublicMembers_WhatsAppNumber ON PublicMembers(WhatsAppNumber);");
         await db.Database.ExecuteSqlRawAsync("UPDATE TenantRoles SET CanReceiveAssignments = 1 WHERE Name IN ('Society Administrator','Manager','Supervisor');");
         await SeedDefaultProjectsAsync(db);
         await SeedDefaultCategoriesAsync(db);

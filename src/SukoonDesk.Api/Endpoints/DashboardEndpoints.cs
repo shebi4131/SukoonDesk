@@ -29,7 +29,13 @@ public static class DashboardEndpoints
             .Include(x => x.CreatedByMembership).ThenInclude(x => x.User).ToListAsync();
         var publicMembers = await db.PublicMembers.AsNoTracking().Where(x => x.TenantId == tenantId).ToListAsync();
         var projects = await db.TenantProjects.AsNoTracking().Where(x => x.TenantId == tenantId && x.IsActive).OrderBy(x => x.SortOrder).ThenBy(x => x.Name).ToListAsync();
-        var projectNames = projects.ToDictionary(x => x.Id, x => x.Name);
+        var projectLabels = projects.ToDictionary(x => x.Id, x => x.Code switch
+        {
+            "JGI" => "JG-I",
+            "JGII" => "JG-II",
+            "KTExt" => "KT Ext",
+            _ => string.IsNullOrWhiteSpace(x.Code) ? x.Name : x.Code
+        });
         var memberByMembership = publicMembers.ToDictionary(x => x.MembershipId);
         var filtered = allRows.Where(x => x.CreatedAt.UtcDateTime >= start && x.CreatedAt.UtcDateTime < end).ToList();
         if (Enum.TryParse<ComplaintStatus>(status, true, out var parsedStatus)) filtered = filtered.Where(x => x.Status == parsedStatus).ToList();
@@ -75,6 +81,7 @@ public static class DashboardEndpoints
             x.Id, x.Number, x.Title, x.Status, x.Priority, x.DueAt, x.CreatedAt,
             category = x.Category.Name, assignee = x.AssignedToMembership?.User.DisplayName,
             resident = x.CreatedByMembership.User.DisplayName,
+            residentWhatsApp = memberByMembership.TryGetValue(x.CreatedByMembershipId, out var publicMember) ? publicMember.WhatsAppNumber : null,
             source = memberByMembership.ContainsKey(x.CreatedByMembershipId) ? "Public desk" : "Staff portal"
         });
         var categories = await db.ComplaintCategories.AsNoTracking().Where(x => x.TenantId == tenantId && x.IsActive)
@@ -105,8 +112,8 @@ public static class DashboardEndpoints
                 byStatus = filtered.GroupBy(x => x.Status).Select(x => new { name = x.Key.ToString(), value = x.Count() }).OrderByDescending(x => x.value),
                 byCategory = filtered.GroupBy(x => x.Category.Name).Select(x => new { name = x.Key, value = x.Count() }).OrderByDescending(x => x.value),
                 byPriority = filtered.GroupBy(x => x.Priority).Select(x => new { name = x.Key.ToString(), value = x.Count() }).OrderByDescending(x => x.value),
-                byPhase = filtered.Where(x => memberByMembership.TryGetValue(x.CreatedByMembershipId, out var member) && member.ProjectId.HasValue && projectNames.ContainsKey(member.ProjectId.Value))
-                    .GroupBy(x => projectNames[memberByMembership[x.CreatedByMembershipId].ProjectId!.Value])
+                byPhase = filtered.Where(x => memberByMembership.TryGetValue(x.CreatedByMembershipId, out var member) && member.ProjectId.HasValue && projectLabels.ContainsKey(member.ProjectId.Value))
+                    .GroupBy(x => projectLabels[memberByMembership[x.CreatedByMembershipId].ProjectId!.Value])
                     .Select(x => new { name = x.Key, value = x.Count() }).OrderByDescending(x => x.value),
                 byAssignee = filtered.GroupBy(x => x.AssignedToMembership?.User.DisplayName ?? "Unassigned").Select(x => new { name = x.Key, value = x.Count() }).OrderByDescending(x => x.value),
                 trend, backlog

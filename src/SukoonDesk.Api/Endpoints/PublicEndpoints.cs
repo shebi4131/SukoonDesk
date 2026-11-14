@@ -19,6 +19,8 @@ public static class PublicEndpoints
         var group = app.MapGroup("/api/public").AllowAnonymous().WithTags("Public complaints").RequireRateLimiting("public");
         group.MapGet("/societies", SearchSocietiesAsync);
         group.MapGet("/societies/{slug}", SocietyAsync);
+        group.MapPost("/register", RegisterDirectAsync);
+        group.MapPost("/sign-in", SignInDirectAsync);
         group.MapPost("/societies/{slug}/register", RegisterAsync);
         group.MapPost("/societies/{slug}/sign-in", SignInAsync);
         group.MapPost("/sign-out", SignOut);
@@ -36,17 +38,17 @@ public static class PublicEndpoints
     private static async Task<IResult> SearchSocietiesAsync(string? query, AppDbContext db, IConfiguration configuration)
     {
         var term = query?.Trim().ToLowerInvariant() ?? string.Empty;
-        if (term.Length < 2) return Results.Ok(Array.Empty<object>());
-
         var platformSlug = configuration["PlatformAdmin:Seed:SocietySlug"]?.Trim().ToLowerInvariant() ?? "sukoondesk-admin";
-        var matches = await db.Tenants.AsNoTracking()
-            .Where(x => x.IsActive && x.SubscriptionStatus != SubscriptionStatus.Suspended && x.SubscriptionStatus != SubscriptionStatus.Expired && x.Slug != platformSlug &&
-                (x.Name.ToLower().Contains(term) || x.Slug.ToLower().Contains(term)))
+        var societiesQuery = db.Tenants.AsNoTracking()
+            .Where(x => x.IsActive && x.SubscriptionStatus != SubscriptionStatus.Suspended && x.SubscriptionStatus != SubscriptionStatus.Expired && x.Slug != platformSlug);
+        if (term.Length > 0)
+            societiesQuery = societiesQuery.Where(x => x.Name.ToLower().Contains(term) || x.Slug.ToLower().Contains(term));
+        var matches = await societiesQuery
             .OrderByDescending(x => x.Name.ToLower() == term || x.Slug == term)
             .ThenByDescending(x => x.Name.ToLower().StartsWith(term) || x.Slug.StartsWith(term))
             .ThenBy(x => x.Name)
-            .Take(10)
-            .Select(x => new { x.Name, x.Slug })
+            .Take(100)
+            .Select(x => new { x.Id, x.Name, x.Slug })
             .ToListAsync();
 
         return Results.Ok(matches);
@@ -67,6 +69,14 @@ public static class PublicEndpoints
 
     private static async Task<IResult> RegisterAsync(string slug, PublicRegistrationRequest request, HttpContext http,
         AppDbContext db, UserManager<ApplicationUser> userManager, IDataProtectionProvider protection)
+        => await RegisterCoreAsync(slug, request, db, userManager);
+
+    private static async Task<IResult> RegisterDirectAsync(PublicRegistrationRequest request,
+        AppDbContext db, UserManager<ApplicationUser> userManager)
+        => await RegisterCoreAsync(request.SocietySlug ?? string.Empty, request, db, userManager);
+
+    private static async Task<IResult> RegisterCoreAsync(string slug, PublicRegistrationRequest request,
+        AppDbContext db, UserManager<ApplicationUser> userManager)
     {
         var tenant = await db.Tenants.SingleOrDefaultAsync(x => x.Slug == slug.ToLower() && x.IsActive);
         if (tenant is null) return Results.NotFound(new { message = "Society not found." });
@@ -75,13 +85,15 @@ public static class PublicEndpoints
             return Results.Problem("This society has reached its resident allowance. Contact the society administrator.", statusCode: StatusCodes.Status403Forbidden);
         var fullName = request.FullName?.Trim() ?? string.Empty;
         var cnic = Digits(request.Cnic);
-        var whatsappNumber = request.WhatsAppNumber?.Trim() ?? string.Empty;
-        var email = request.Email?.Trim() ?? string.Empty;
+        var phone = Digits(request.Phone);
+        var whatsappNumber = Digits(request.WhatsAppNumber);
+        var email = request.Email?.Trim().ToLowerInvariant() ?? string.Empty;
         var plotNo = request.PlotNo?.Trim() ?? string.Empty;
         var streetNo = request.StreetNo?.Trim() ?? string.Empty;
         var errors = new Dictionary<string, string[]>();
         if (fullName.Length < 2) errors["fullName"] = ["Enter the member's full name."];
         if (cnic.Length != 13) errors["cnic"] = ["CNIC must contain exactly 13 digits."];
+        if (phone.Length is < 10 or > 13) errors["phone"] = ["Enter a valid phone number including its country or local prefix."];
         if (Digits(whatsappNumber).Length is < 10 or > 13) errors["whatsAppNumber"] = ["Enter a valid WhatsApp number including its country or local prefix."];
         if (!new EmailAddressAttribute().IsValid(email)) errors["email"] = ["Enter a valid email address."];
         if (plotNo.Length == 0) errors["plotNo"] = ["Plot number is required."];
@@ -93,41 +105,68 @@ public static class PublicEndpoints
         if (!request.NotifyByEmail && !request.NotifyByWhatsApp) errors["notifications"] = ["Select at least one update channel."];
         if (string.IsNullOrWhiteSpace(request.Password)) errors["password"] = ["Password is required."];
         if (errors.Count > 0) return Results.ValidationProblem(errors);
-        if (await db.PublicMembers.AnyAsync(x => x.TenantId == tenant.Id && x.Cnic == cnic))
+        if (await db.PublicMembers.AnyAsync(x => x.Cnic == cnic))
             return Results.Conflict(new { message = "This CNIC is already registered. Sign in instead." });
+        if (await db.PublicMembers.AnyAsync(x => x.Phone == phone))
+            return Results.Conflict(new { message = "This phone number is already registered." });
+        if (await db.PublicMembers.AnyAsync(x => x.WhatsAppNumber == whatsappNumber))
+            return Results.Conflict(new { message = "This WhatsApp number is already registered." });
+        if (await db.PublicMembers.AnyAsync(x => x.Email.ToLower() == email) || await userManager.FindByEmailAsync(email) is not null)
+            return Results.Conflict(new { message = "This email address is already registered. Sign in instead." });
 
         await using var transaction = await db.Database.BeginTransactionAsync();
-        var syntheticEmail = $"{tenant.Slug}.{cnic}@members.sukoondesk.local";
-        var user = new ApplicationUser { UserName = syntheticEmail, Email = syntheticEmail, DisplayName = fullName, EmailConfirmed = true };
+        var user = new ApplicationUser { UserName = email, Email = email, DisplayName = fullName, PhoneNumber = phone, EmailConfirmed = true };
         var result = await userManager.CreateAsync(user, request.Password!);
         if (!result.Succeeded)
         {
             await transaction.RollbackAsync();
             return Results.ValidationProblem(result.Errors.GroupBy(x => x.Code).ToDictionary(x => x.Key, x => x.Select(e => e.Description).ToArray()));
         }
-        var membership = new TenantMembership { TenantId = tenant.Id, UserId = user.Id, Status = MembershipStatus.Active, UnitLabel = Address(plotNo, streetNo, request.Block, project!.Name) };
+        var membership = new TenantMembership { TenantId = tenant.Id, UserId = user.Id, Status = MembershipStatus.Pending, UnitLabel = Address(plotNo, streetNo, request.Block, project!.Name) };
         var member = new PublicMember
         {
             TenantId = tenant.Id, Membership = membership, Cnic = cnic, FullName = fullName,
-            Phone = whatsappNumber, WhatsAppNumber = whatsappNumber, Email = email, PlotNo = plotNo, StreetNo = streetNo,
+            Phone = phone, WhatsAppNumber = whatsappNumber, Email = email, PlotNo = plotNo, StreetNo = streetNo,
             Block = request.Block?.Trim() ?? string.Empty, ProjectId = project.Id,
             NotifyByEmail = request.NotifyByEmail, NotifyByWhatsApp = request.NotifyByWhatsApp
         };
         db.PublicMembers.Add(member);
+        var residentRoleId = await db.TenantRoles.Where(x => x.TenantId == tenant.Id && x.Name == "Resident").Select(x => x.Id).FirstOrDefaultAsync();
+        if (residentRoleId != Guid.Empty) db.MembershipRoles.Add(new MembershipRole { Membership = membership, RoleId = residentRoleId });
         await db.SaveChangesAsync();
         await transaction.CommitAsync();
-        SetCookie(http, protection, member);
-        return Results.Ok(MemberPayload(member, tenant));
+        return Results.Accepted(value: new
+        {
+            pendingApproval = true,
+            message = "Registration submitted successfully. Your account will be activated after society administrator approval, normally within 1 hour."
+        });
     }
 
     private static async Task<IResult> SignInAsync(string slug, PublicSignInRequest request, HttpContext http,
         AppDbContext db, UserManager<ApplicationUser> userManager, IDataProtectionProvider protection)
+        => await SignInCoreAsync(request.Identifier ?? request.Cnic, request.Password, slug, http, db, userManager, protection);
+
+    private static async Task<IResult> SignInDirectAsync(PublicSignInRequest request, HttpContext http,
+        AppDbContext db, UserManager<ApplicationUser> userManager, IDataProtectionProvider protection)
+        => await SignInCoreAsync(request.Identifier ?? request.Cnic, request.Password, null, http, db, userManager, protection);
+
+    private static async Task<IResult> SignInCoreAsync(string? rawIdentifier, string password, string? slug, HttpContext http,
+        AppDbContext db, UserManager<ApplicationUser> userManager, IDataProtectionProvider protection)
     {
-        var cnic = Digits(request.Cnic);
-        var member = await db.PublicMembers.Include(x => x.Tenant).Include(x => x.Membership).ThenInclude(x => x.User)
-            .SingleOrDefaultAsync(x => x.Tenant.Slug == slug.ToLower() && x.Cnic == cnic && x.IsActive);
-        if (member is null || !TenantAccess.IsAvailable(member.Tenant) ||
-            !await userManager.CheckPasswordAsync(member.Membership.User, request.Password)) return Results.Unauthorized();
+        var identifier = rawIdentifier?.Trim() ?? string.Empty;
+        var cnic = Digits(identifier);
+        var email = identifier.ToLowerInvariant();
+        var members = await db.PublicMembers.Include(x => x.Tenant).Include(x => x.Project).Include(x => x.Membership).ThenInclude(x => x.User)
+            .Where(x => x.IsActive && (x.Cnic == cnic || x.Email.ToLower() == email) && (slug == null || x.Tenant.Slug == slug.ToLower()))
+            .Take(2).ToListAsync();
+        if (members.Count != 1) return Results.Unauthorized();
+        var member = members[0];
+        if (member.Membership.Status == MembershipStatus.Pending)
+            return Results.Json(new { message = "Your registration is awaiting administrator approval. Accounts are normally activated within 1 hour." }, statusCode: StatusCodes.Status403Forbidden);
+        if (member.Membership.Status == MembershipStatus.Suspended)
+            return Results.Json(new { message = "Your account is temporarily suspended. Contact your society administrator." }, statusCode: StatusCodes.Status403Forbidden);
+        if (member.Membership.Status != MembershipStatus.Active || !TenantAccess.IsAvailable(member.Tenant) ||
+            !await userManager.CheckPasswordAsync(member.Membership.User, password)) return Results.Unauthorized();
         SetCookie(http, protection, member);
         return Results.Ok(MemberPayload(member, member.Tenant));
     }
@@ -314,7 +353,7 @@ public static class PublicEndpoints
 
     private static object MemberPayload(PublicMember member, Tenant tenant) => new
     {
-        member.Id, member.FullName, member.WhatsAppNumber, member.Email, member.PlotNo, member.StreetNo, member.Block,
+        member.Id, member.FullName, member.Phone, member.WhatsAppNumber, member.Email, member.PlotNo, member.StreetNo, member.Block,
         member.ProjectId, project = member.Project == null ? null : new { member.Project.Id, member.Project.Name, member.Project.Code },
         member.NotifyByEmail, member.NotifyByWhatsApp,
         tenant = new { tenant.Id, tenant.Name, tenant.Slug }
@@ -333,7 +372,7 @@ public static class PublicEndpoints
     private static string Address(PublicMember x) => $"Plot {x.PlotNo}, Street {x.StreetNo}{(string.IsNullOrWhiteSpace(x.Block) ? "" : $", Block {x.Block}")}{(x.Project is null ? "" : $", {x.Project.Name}")}";
 }
 
-public sealed record PublicRegistrationRequest(string? FullName, string? Cnic, string? WhatsAppNumber, string? Email, string? Password, string? PlotNo, string? StreetNo, string? Block, Guid? ProjectId, bool NotifyByEmail = true, bool NotifyByWhatsApp = false);
-public sealed record PublicSignInRequest(string Cnic, string Password);
+public sealed record PublicRegistrationRequest(string? SocietySlug, string? FullName, string? Cnic, string? Phone, string? WhatsAppNumber, string? Email, string? Password, string? PlotNo, string? StreetNo, string? Block, Guid? ProjectId, bool NotifyByEmail = true, bool NotifyByWhatsApp = false);
+public sealed record PublicSignInRequest(string? Identifier, string? Cnic, string Password);
 public sealed record PublicComplaintRequest(string Title, string Description, string? Location, Guid CategoryId, ComplaintPriority? Priority);
 public sealed record PublicCommentRequest(string Body);

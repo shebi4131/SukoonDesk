@@ -1,15 +1,16 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Activity, AlertTriangle, BarChart3, CheckCircle2, Clock3, Filter, MessageSquarePlus, Star, UserRoundCheck, UsersRound } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { Activity, AlertTriangle, BarChart3, CheckCircle2, Clock3, Filter, MessageCircle, MessageSquarePlus, Star, UserRoundCheck, UsersRound } from 'lucide-react'
+import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import type { Dashboard } from '../lib/types'
-import { humanize, relativeTime } from '../lib/format'
+import { humanize, relativeTime, whatsAppHref } from '../lib/format'
 
 const today = new Date().toISOString().slice(0, 10)
 const monthAgo = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)
 
 export function DashboardPage() {
+  const navigate = useNavigate()
   const [filters, setFilters] = useState({ from: monthAgo, to: today, status: '', categoryId: '', priority: '', phase: '' })
   const queryString = useMemo(() => { const query = new URLSearchParams(); Object.entries(filters).forEach(([key, value]) => value && query.set(key, value)); return query.toString() }, [filters])
   const { data, isLoading } = useQuery({ queryKey: ['dashboard', filters], queryFn: () => api<Dashboard>(`/api/dashboard?${queryString}`) })
@@ -36,8 +37,8 @@ export function DashboardPage() {
       <section className="panel chart-panel"><div className="panel-heading"><div><h2>Top complaint categories</h2><p>Services receiving the most attention.</p></div></div><div className="dashboard-bars">{data.charts.byCategory.map(x => <div key={x.name}><span>{x.name}<strong>{x.value}</strong></span><b><i style={{ width: `${x.value / maximum(data.charts.byCategory) * 100}%` }} /></b></div>)}</div></section>
       <section className="panel chart-panel"><div className="panel-heading"><div><h2>Backlog age</h2><p>How long open complaints have remained active.</p></div></div><div className="backlog-grid">{data.charts.backlog.map((x, index) => <article key={x.name} className={`age-${index}`}><strong>{x.value}</strong><span>{x.name}</span></article>)}</div></section>
       <section className="panel chart-panel"><div className="panel-heading"><div><h2>Workload by assignee</h2><p>Ownership across supervisors and managers.</p></div></div><div className="dashboard-bars compact">{data.charts.byAssignee.slice(0, 7).map(x => <div key={x.name}><span>{x.name}<strong>{x.value}</strong></span><b><i style={{ width: `${x.value / maximum(data.charts.byAssignee) * 100}%` }} /></b></div>)}</div></section>
-      <section className="panel chart-panel"><div className="panel-heading"><div><h2>Complaints by phase</h2><p>Location hotspots from registered public members.</p></div></div>{data.charts.byPhase.length ? <div className="phase-donuts">{data.charts.byPhase.map(x => <article key={x.name}><span>{x.value}</span><strong>{humanize(x.name)}</strong></article>)}</div> : <p className="chart-empty">Phase data appears when public members register complaints.</p>}</section>
+      <section className="panel chart-panel"><div className="panel-heading"><div><h2>Complaints by phase</h2><p>Location hotspots from registered public members.</p></div></div>{data.charts.byPhase.length ? <div className="phase-donuts">{data.charts.byPhase.map(x => <article key={x.name}><span>{x.value}</span><strong>{x.name}</strong></article>)}</div> : <p className="chart-empty">Phase data appears when public members register complaints.</p>}</section>
     </div>
-    <section className="panel dashboard-recent"><div className="panel-heading"><div><h2>Recent complaints</h2><p>Latest records matching the dashboard filters.</p></div><Link className="text-button" to="/app/complaints">Open queue</Link></div><div>{data.recent.map(item => <Link to={`/app/complaints/${item.id}`} className="dashboard-complaint-row dashboard-complaint-rich" key={item.id}><span className={`status-dot status-${item.status.toLowerCase()}`} /><div><strong>{item.title}</strong><small>{item.number} · {item.category} · {item.source}</small></div><span>{item.resident}</span><span>{item.assignee ?? 'Unassigned'}</span><i className={`status-chip status-${item.status.toLowerCase()}`}>{humanize(item.status)}</i><time>{relativeTime(item.createdAt)}</time></Link>)}{!data.recent.length && <div className="empty-state compact"><MessageSquarePlus /><h3>No matching complaints</h3><p>Adjust the filters to broaden this dashboard view.</p></div>}</div></section>
+    <section className="panel dashboard-recent"><div className="panel-heading"><div><h2>Recent complaints</h2><p>Latest records matching the dashboard filters.</p></div><Link className="text-button" to="/app/complaints">Open queue</Link></div><div>{data.recent.map(item => <div role="button" tabIndex={0} onClick={() => navigate(`/app/complaints/${item.id}`)} onKeyDown={event => event.key === 'Enter' && navigate(`/app/complaints/${item.id}`)} className="dashboard-complaint-row dashboard-complaint-rich" key={item.id}><span className={`status-dot status-${item.status.toLowerCase()}`} /><div><strong>{item.title}</strong><small>{item.number} · {item.category} · {item.source}</small></div><span className="resident-contact">{item.resident}{item.residentWhatsApp && <a href={whatsAppHref(item.residentWhatsApp, `Hello, regarding your complaint ${item.number}`)} target="_blank" rel="noreferrer" onClick={event => event.stopPropagation()}><MessageCircle size={11} /> {item.residentWhatsApp}</a>}</span><span>{item.assignee ?? 'Unassigned'}</span><i className={`status-chip status-${item.status.toLowerCase()}`}>{humanize(item.status)}</i><time>{relativeTime(item.createdAt)}</time></div>)}{!data.recent.length && <div className="empty-state compact"><MessageSquarePlus /><h3>No matching complaints</h3><p>Adjust the filters to broaden this dashboard view.</p></div>}</div></section>
   </>
 }
