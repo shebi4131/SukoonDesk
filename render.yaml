@@ -40,3 +40,11 @@ services:
         value: v21.0
       - key: PlatformAdmin__Emails__0
         sync: false
+      - key: PlatformAdmin__Seed__Enabled
+        value: true
+      - key: PlatformAdmin__Seed__Email
+        sync: false
+      - key: PlatformAdmin__Seed__Password
+        sync: false
+      - key: PlatformAdmin__Seed__SocietySlug
+        value: sukoondesk-admin

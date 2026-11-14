@@ -41,7 +41,16 @@ public static class PlatformAdminSeeder
         {
             user.IsPlatformAdmin = true;
             user.IsActive = true;
-            await userManager.UpdateAsync(user);
+            user.EmailConfirmed = true;
+            var updated = await userManager.UpdateAsync(user);
+            if (!updated.Succeeded) throw new InvalidOperationException(string.Join("; ", updated.Errors.Select(x => x.Description)));
+
+            if (!await userManager.CheckPasswordAsync(user, password))
+            {
+                var resetToken = await userManager.GeneratePasswordResetTokenAsync(user);
+                var reset = await userManager.ResetPasswordAsync(user, resetToken, password);
+                if (!reset.Succeeded) throw new InvalidOperationException(string.Join("; ", reset.Errors.Select(x => x.Description)));
+            }
         }
 
         var membership = await db.TenantMemberships.SingleOrDefaultAsync(x => x.TenantId == tenant.Id && x.UserId == user.Id);
