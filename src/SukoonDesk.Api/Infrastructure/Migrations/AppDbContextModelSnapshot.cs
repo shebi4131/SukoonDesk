@@ -752,12 +752,23 @@ namespace SukoonDesk.Api.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("Cnic")
+                        .IsUnique();
+
+                    b.HasIndex("Email")
+                        .IsUnique();
+
                     b.HasIndex("MembershipId")
+                        .IsUnique();
+
+                    b.HasIndex("Phone")
                         .IsUnique();
 
                     b.HasIndex("ProjectId");
 
-                    b.HasIndex("TenantId", "Cnic")
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("WhatsAppNumber")
                         .IsUnique();
 
                     b.ToTable("PublicMembers");

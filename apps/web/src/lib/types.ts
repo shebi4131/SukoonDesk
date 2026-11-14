@@ -67,7 +67,7 @@ export type Dashboard = {
     trend: Array<{ label: string; created: number; resolved: number }>
     backlog: Array<{ name: string; value: number }>
   }
-  recent: Array<{ id: string; number: string; title: string; status: string; priority: string; dueAt: string; createdAt: string; category: string; assignee: string | null; resident: string; source: string }>
+  recent: Array<{ id: string; number: string; title: string; status: string; priority: string; dueAt: string; createdAt: string; category: string; assignee: string | null; resident: string; residentWhatsApp: string | null; source: string }>
 }
 
 export type ComplaintCategory = {
@@ -93,6 +93,7 @@ export type ComplaintSummary = {
   updatedAt: string
   category: { id: string; name: string; color: string }
   resident: string
+  residentWhatsApp: string | null
   assignedTo: string | null
   isOverdue: boolean
 }
@@ -113,7 +114,7 @@ export type ComplaintDetail = {
   closedAt: string | null
   createdByMembershipId: string
   assignedToMembershipId: string | null
-  resident: { id: string; displayName: string; email: string; unitLabel: string }
+  resident: { id: string; displayName: string; email: string; unitLabel: string; phone: string | null; whatsAppNumber: string | null }
   assignedTo: { id: string; displayName: string; email: string } | null
   attachments: Attachment[]
   comments: Array<{ id: string; body: string; isInternal: boolean; createdAt: string; author: string; authorMembershipId: string; attachments: Attachment[] }>
@@ -126,6 +127,7 @@ export type Attachment = { id: string; fileName: string; contentType: string; si
 export type PublicMember = {
   id: string
   fullName: string
+  phone: string
   whatsAppNumber: string
   email: string
   plotNo: string
@@ -169,6 +171,7 @@ export type Member = {
   email: string
   cnic: string | null
   phoneNumber: string | null
+  whatsAppNumber: string | null
   unitLabel: string
   status: string
   joinedAt: string
