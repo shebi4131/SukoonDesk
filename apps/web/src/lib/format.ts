@@ -9,3 +9,8 @@ export const relativeTime = (value: string) => {
   if (Math.abs(seconds) < 86400) return formatter.format(Math.round(seconds / 3600), 'hour')
   return formatter.format(Math.round(seconds / 86400), 'day')
 }
+export const whatsAppHref = (value: string, message = '') => {
+  let digits = value.replace(/\D/g, '')
+  if (digits.startsWith('0')) digits = `92${digits.slice(1)}`
+  return `https://wa.me/${digits}${message ? `?text=${encodeURIComponent(message)}` : ''}`
+}

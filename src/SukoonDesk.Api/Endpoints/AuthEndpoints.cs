@@ -151,17 +151,46 @@ public static partial class AuthEndpoints
         SignInManager<ApplicationUser> signInManager,
         IConfiguration configuration)
     {
-        var tenant = await db.Tenants.SingleOrDefaultAsync(x => x.Slug == request.SocietySlug.Trim().ToLower());
-        var user = await userManager.FindByEmailAsync(request.Email.Trim());
-        if (tenant is null || user is null || !user.IsActive || !await userManager.CheckPasswordAsync(user, request.Password))
+        var identifier = request.Identifier?.Trim() ?? request.Email?.Trim() ?? string.Empty;
+        ApplicationUser? user = null;
+        if (new System.ComponentModel.DataAnnotations.EmailAddressAttribute().IsValid(identifier))
+        {
+            user = await userManager.FindByEmailAsync(identifier);
+            if (user is null)
+            {
+                var publicUserId = await db.PublicMembers.Where(x => x.Email.ToLower() == identifier.ToLower())
+                    .Select(x => x.Membership.UserId).FirstOrDefaultAsync();
+                if (publicUserId != Guid.Empty) user = await userManager.FindByIdAsync(publicUserId.ToString());
+            }
+        }
+        else
+        {
+            var cnic = Regex.Replace(identifier, "[^0-9]", string.Empty);
+            var publicUserId = await db.PublicMembers.Where(x => x.Cnic == cnic)
+                .Select(x => x.Membership.UserId).FirstOrDefaultAsync();
+            if (publicUserId != Guid.Empty) user = await userManager.FindByIdAsync(publicUserId.ToString());
+        }
+        if (user is null || !user.IsActive || !await userManager.CheckPasswordAsync(user, request.Password))
             return Results.Unauthorized();
+
+        var platformSlug = configuration["PlatformAdmin:Seed:SocietySlug"]?.Trim().ToLowerInvariant() ?? "sukoondesk-admin";
+        var memberships = await db.TenantMemberships.Include(x => x.Tenant)
+            .Where(x => x.UserId == user.Id && x.Status != MembershipStatus.Deleted)
+            .Where(x => request.PlatformOnly
+                ? x.Tenant.Slug == platformSlug
+                : x.Tenant.Slug != platformSlug && db.MembershipRoles.Any(role => role.MembershipId == x.Id && role.Role.Name != "Resident"))
+            .Take(2).ToListAsync();
+        if (memberships.Count != 1) return Results.Unauthorized();
+        var membership = memberships[0];
+        var tenant = membership.Tenant;
+        if (membership.Status == MembershipStatus.Pending)
+            return Results.Json(new { message = "Your account is awaiting administrator approval. Accounts are normally activated within 1 hour." }, statusCode: StatusCodes.Status403Forbidden);
+        if (membership.Status == MembershipStatus.Suspended)
+            return Results.Json(new { message = "Your account is temporarily suspended. Contact your society administrator." }, statusCode: StatusCodes.Status403Forbidden);
+        if (membership.Status != MembershipStatus.Active) return Results.Unauthorized();
         if (!tenant.IsActive) return Results.Json(new { message = "This society request is awaiting approval. We will email the administrator when it is approved." }, statusCode: StatusCodes.Status403Forbidden);
         if (!TenantAccess.IsAvailable(tenant))
             return Results.Json(new { message = "This society subscription is currently unavailable. Contact your society or SukoonDesk administrator." }, statusCode: StatusCodes.Status403Forbidden);
-
-        var membership = await db.TenantMemberships.SingleOrDefaultAsync(x =>
-            x.TenantId == tenant.Id && x.UserId == user.Id && x.Status == MembershipStatus.Active);
-        if (membership is null) return Results.Unauthorized();
 
         await signInManager.SignOutAsync();
         await SignInForTenantAsync(signInManager, user, tenant, membership, request.RememberMe);
@@ -180,23 +209,21 @@ public static partial class AuthEndpoints
         if (!emailSender.IsConfigured)
             return Results.Problem("Email delivery is not configured. Add the SMTP settings before using password recovery.", statusCode: StatusCodes.Status503ServiceUnavailable);
 
-        var slug = request.SocietySlug?.Trim().ToLowerInvariant() ?? string.Empty;
         var email = request.Email?.Trim() ?? string.Empty;
-        if (slug.Length < 3 || !new System.ComponentModel.DataAnnotations.EmailAddressAttribute().IsValid(email))
+        if (!new System.ComponentModel.DataAnnotations.EmailAddressAttribute().IsValid(email))
             return Results.Ok(new { message = successMessage });
-
-        var tenant = await db.Tenants.AsNoTracking().SingleOrDefaultAsync(x => x.Slug == slug && x.IsActive, cancellationToken);
-        if (tenant is null) return Results.Ok(new { message = successMessage });
 
         var normalizedEmail = userManager.NormalizeEmail(email);
         var membership = await db.TenantMemberships.Include(x => x.User)
-            .SingleOrDefaultAsync(x => x.TenantId == tenant.Id && x.Status != MembershipStatus.Deleted && x.User.NormalizedEmail == normalizedEmail, cancellationToken);
+            .Include(x => x.Tenant)
+            .FirstOrDefaultAsync(x => x.Status != MembershipStatus.Deleted && x.User.NormalizedEmail == normalizedEmail, cancellationToken);
         var publicMember = membership is null
-            ? await db.PublicMembers.Include(x => x.Membership).ThenInclude(x => x.User)
-                .SingleOrDefaultAsync(x => x.TenantId == tenant.Id && x.IsActive && x.Email.ToLower() == email.ToLower(), cancellationToken)
+            ? await db.PublicMembers.Include(x => x.Tenant).Include(x => x.Membership).ThenInclude(x => x.User)
+                .FirstOrDefaultAsync(x => x.IsActive && x.Email.ToLower() == email.ToLower(), cancellationToken)
             : null;
         var user = membership?.User ?? publicMember?.Membership.User;
-        if (user is null || !user.IsActive) return Results.Ok(new { message = successMessage });
+        var tenant = membership?.Tenant ?? publicMember?.Tenant;
+        if (user is null || tenant is null || !user.IsActive) return Results.Ok(new { message = successMessage });
 
         var temporaryPassword = GenerateTemporaryPassword();
         var oldPasswordHash = user.PasswordHash;
@@ -367,6 +394,6 @@ public static partial class AuthEndpoints
 }
 
 public sealed record SignUpRequest(string FullName, string Email, string Password, string SocietyName, string SocietySlug);
-public sealed record SignInRequest(string Email, string Password, string SocietySlug, bool RememberMe = true);
+public sealed record SignInRequest(string? Identifier, string? Email, string Password, bool RememberMe = true, bool PlatformOnly = false);
 public sealed record JoinSocietyRequest(string FullName, string Email, string Password, string SocietySlug, string UnitLabel);
-public sealed record ForgotPasswordRequest(string SocietySlug, string Email);
+public sealed record ForgotPasswordRequest(string Email);

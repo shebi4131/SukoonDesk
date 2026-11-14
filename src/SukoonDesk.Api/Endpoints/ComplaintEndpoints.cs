@@ -60,12 +60,16 @@ public static class ComplaintEndpoints
         var total = await query.CountAsync();
         var rows = await query.Include(x => x.Category).Include(x => x.CreatedByMembership).ThenInclude(x => x.User)
             .Include(x => x.AssignedToMembership).ThenInclude(x => x!.User).ToListAsync();
+        var residentIds = rows.Select(x => x.CreatedByMembershipId).Distinct().ToArray();
+        var whatsAppByMembership = await db.PublicMembers.AsNoTracking().Where(x => residentIds.Contains(x.MembershipId))
+            .ToDictionaryAsync(x => x.MembershipId, x => x.WhatsAppNumber);
         var items = rows.OrderByDescending(x => x.CreatedAt).Skip((page - 1) * pageSize).Take(pageSize)
             .Select(x => new
             {
                 x.Id, x.Number, x.Title, x.Location, x.Priority, x.Status, x.DueAt, x.CreatedAt, x.UpdatedAt,
                 category = new { x.Category.Id, x.Category.Name, x.Category.Color },
                 resident = x.CreatedByMembership.User.DisplayName,
+                residentWhatsApp = whatsAppByMembership.GetValueOrDefault(x.CreatedByMembershipId),
                 assignedTo = x.AssignedToMembership == null ? null : x.AssignedToMembership.User.DisplayName,
                 isOverdue = x.DueAt < DateTimeOffset.UtcNow && x.Status != ComplaintStatus.Resolved && x.Status != ComplaintStatus.Closed
             }).ToList();
@@ -86,12 +90,14 @@ public static class ComplaintEndpoints
         if (row is null) return Results.NotFound();
         var canViewAll = await HasPermissionAsync(db, membershipId, Permissions.ComplaintsViewAll);
         if (!canViewAll && row.CreatedByMembershipId != membershipId) return Results.Forbid();
+        var residentContact = await db.PublicMembers.AsNoTracking().Where(x => x.MembershipId == row.CreatedByMembershipId)
+            .Select(x => new { x.Phone, x.WhatsAppNumber }).FirstOrDefaultAsync();
         var complaint = new
         {
             row.Id, row.Number, row.Title, row.Description, row.Location, row.Priority, row.Status, row.DueAt,
             row.ResolvedAt, row.ClosedAt, row.CreatedAt, row.UpdatedAt, row.CreatedByMembershipId, row.AssignedToMembershipId,
             category = new { row.Category.Id, row.Category.Name, row.Category.Color, row.Category.DefaultSlaHours },
-            resident = new { row.CreatedByMembership.Id, row.CreatedByMembership.User.DisplayName, row.CreatedByMembership.User.Email, row.CreatedByMembership.UnitLabel },
+            resident = new { row.CreatedByMembership.Id, row.CreatedByMembership.User.DisplayName, row.CreatedByMembership.User.Email, row.CreatedByMembership.UnitLabel, phone = residentContact == null ? null : residentContact.Phone, whatsAppNumber = residentContact == null ? null : residentContact.WhatsAppNumber },
             assignedTo = row.AssignedToMembership == null ? null : new { row.AssignedToMembership.Id, row.AssignedToMembership.User.DisplayName, row.AssignedToMembership.User.Email },
             attachments = row.Attachments.Where(x => x.CommentId == null).Select(AttachmentPayload),
             comments = row.Comments.OrderBy(c => c.CreatedAt).Select(c => new { c.Id, c.Body, c.IsInternal, c.CreatedAt, author = c.AuthorMembership.User.DisplayName, c.AuthorMembershipId, attachments = c.Attachments.Select(AttachmentPayload) }),
