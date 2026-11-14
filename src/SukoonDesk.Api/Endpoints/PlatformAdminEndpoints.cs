@@ -87,6 +87,11 @@ public static class PlatformAdminEndpoints
     internal static async Task<bool> IsPlatformAdminAsync(ClaimsPrincipal principal, AppDbContext db, IConfiguration configuration)
     {
         if (!Guid.TryParse(principal.FindFirstValue(ClaimTypes.NameIdentifier), out var userId)) return false;
+        return await IsPlatformAdminAsync(userId, db, configuration);
+    }
+
+    internal static async Task<bool> IsPlatformAdminAsync(Guid userId, AppDbContext db, IConfiguration configuration)
+    {
         var user = await db.Users.Where(x => x.Id == userId && x.IsActive).Select(x => new { x.NormalizedEmail, x.IsPlatformAdmin }).SingleOrDefaultAsync();
         if (user is null) return false;
         if (user.IsPlatformAdmin) return true;

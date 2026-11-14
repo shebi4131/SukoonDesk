@@ -173,6 +173,9 @@ public static partial class AuthEndpoints
         if (user is null || !user.IsActive || !await userManager.CheckPasswordAsync(user, request.Password))
             return Results.Unauthorized();
 
+        if (request.PlatformOnly && !await PlatformAdminEndpoints.IsPlatformAdminAsync(user.Id, db, configuration))
+            return Results.Unauthorized();
+
         var platformSlug = configuration["PlatformAdmin:Seed:SocietySlug"]?.Trim().ToLowerInvariant() ?? "sukoondesk-admin";
         var memberships = await db.TenantMemberships.Include(x => x.Tenant)
             .Where(x => x.UserId == user.Id && x.Status != MembershipStatus.Deleted)
