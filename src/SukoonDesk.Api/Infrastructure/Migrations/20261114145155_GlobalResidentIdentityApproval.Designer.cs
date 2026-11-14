@@ -758,9 +758,6 @@ namespace SukoonDesk.Api.Infrastructure.Migrations
                     b.HasIndex("Cnic")
                         .IsUnique();
 
-                    b.HasIndex("Email")
-                        .IsUnique();
-
                     b.HasIndex("MembershipId")
                         .IsUnique();
 

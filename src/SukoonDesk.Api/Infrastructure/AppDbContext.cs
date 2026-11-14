@@ -38,7 +38,6 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
         builder.Entity<PublicMember>().HasIndex(x => x.Cnic).IsUnique();
         builder.Entity<PublicMember>().HasIndex(x => x.Phone).IsUnique();
         builder.Entity<PublicMember>().HasIndex(x => x.WhatsAppNumber).IsUnique();
-        builder.Entity<PublicMember>().HasIndex(x => x.Email).IsUnique();
         builder.Entity<PublicMember>().HasIndex(x => x.MembershipId).IsUnique();
         builder.Entity<TenantProject>().HasIndex(x => new { x.TenantId, x.Name }).IsUnique();
         builder.Entity<TenantProject>().HasIndex(x => new { x.TenantId, x.Code }).IsUnique();

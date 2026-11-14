@@ -21,12 +21,6 @@ namespace SukoonDesk.Api.Infrastructure.Migrations
                 unique: true);
 
             migrationBuilder.CreateIndex(
-                name: "IX_PublicMembers_Email",
-                table: "PublicMembers",
-                column: "Email",
-                unique: true);
-
-            migrationBuilder.CreateIndex(
                 name: "IX_PublicMembers_Phone",
                 table: "PublicMembers",
                 column: "Phone",
@@ -49,10 +43,6 @@ namespace SukoonDesk.Api.Infrastructure.Migrations
         {
             migrationBuilder.DropIndex(
                 name: "IX_PublicMembers_Cnic",
-                table: "PublicMembers");
-
-            migrationBuilder.DropIndex(
-                name: "IX_PublicMembers_Email",
                 table: "PublicMembers");
 
             migrationBuilder.DropIndex(
