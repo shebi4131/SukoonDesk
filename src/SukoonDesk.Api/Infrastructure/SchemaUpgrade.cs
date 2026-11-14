@@ -171,8 +171,8 @@ public static class SchemaUpgrade
         await EnsureColumnAsync(db, connection, "PublicMembers", "NotifyByWhatsApp", "INTEGER NOT NULL DEFAULT 0");
         await db.Database.ExecuteSqlRawAsync("UPDATE PublicMembers SET WhatsAppNumber = Phone WHERE WhatsAppNumber = ''; ");
         await db.Database.ExecuteSqlRawAsync("DROP INDEX IF EXISTS IX_PublicMembers_TenantId_Cnic;");
+        await db.Database.ExecuteSqlRawAsync("DROP INDEX IF EXISTS IX_PublicMembers_Email;");
         await db.Database.ExecuteSqlRawAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_PublicMembers_Cnic ON PublicMembers(Cnic);");
-        await db.Database.ExecuteSqlRawAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_PublicMembers_Email ON PublicMembers(Email);");
         await db.Database.ExecuteSqlRawAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_PublicMembers_Phone ON PublicMembers(Phone);");
         await db.Database.ExecuteSqlRawAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_PublicMembers_WhatsAppNumber ON PublicMembers(WhatsAppNumber);");
         await db.Database.ExecuteSqlRawAsync("UPDATE TenantRoles SET CanReceiveAssignments = 1 WHERE Name IN ('Society Administrator','Manager','Supervisor');");
