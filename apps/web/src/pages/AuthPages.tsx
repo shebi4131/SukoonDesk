@@ -54,7 +54,7 @@ export function SignInPage() {
   const { user, completeSignIn } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
-  const platformMode = location.pathname === '/platform-sign-in'
+  const platformMode = location.pathname === '/admin' || location.pathname === '/platform-sign-in'
   const [showPassword, setShowPassword] = useState(false)
   const [serverError, setServerError] = useState('')
   const [forgotOpen, setForgotOpen] = useState(false)
@@ -64,7 +64,7 @@ export function SignInPage() {
     resolver: zodResolver(signInSchema),
     defaultValues: { rememberMe: true },
   })
-  if (user) return <Navigate to="/app" replace />
+  if (user) return <Navigate to={user.isPlatformAdmin ? '/app/platform' : '/app'} replace />
 
   const recoverPassword = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault(); setForgotBusy(true); setServerError(''); setForgotMessage('')
@@ -83,7 +83,11 @@ export function SignInPage() {
       completeSignIn(authenticatedUser)
       navigate(authenticatedUser.isPlatformAdmin ? '/app/platform' : '/app', { replace: true })
     } catch (error) {
-      setServerError(error instanceof ApiError ? (error.status === 401 ? 'CNIC/email or password is incorrect, or this account does not have staff access.' : error.message) : 'We could not sign you in. Please try again.')
+      setServerError(error instanceof ApiError ? (error.status === 401
+        ? platformMode
+          ? 'Email or password is incorrect, or this account does not have platform administrator access.'
+          : 'CNIC/email or password is incorrect, or this account does not have staff access.'
+        : error.message) : 'We could not sign you in. Please try again.')
     }
   }
 
@@ -103,7 +107,7 @@ export function SignInPage() {
       <label>Password<div className="password-input"><input {...register('password')} type={showPassword ? 'text' : 'password'} placeholder="Enter your password" /><button type="button" onClick={() => setShowPassword(x => !x)} aria-label="Toggle password">{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button></div>{errors.password && <small className="field-error">{errors.password.message}</small>}</label>
       <div className="form-options"><label className="check-label"><input type="checkbox" {...register('rememberMe')} /> Keep me signed in</label><button type="button" className="link-button" onClick={() => setForgotOpen(true)}>Forgot password?</button></div>
       <button className="button button-primary button-block" disabled={isSubmitting}>{isSubmitting ? 'Signing in…' : 'Sign in'}</button>
-      <p className="form-switch">New to SukoonDesk? <Link to="/sign-up">Create your society</Link></p>
+      {!platformMode && <p className="form-switch">New to SukoonDesk? <Link to="/sign-up">Create your society</Link></p>}
     </form>
   </AuthLayout>
 }
